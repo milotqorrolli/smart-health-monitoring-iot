@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta http-equiv="refresh" content="5">
+    <title>Smart Health Monitoring</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  </head>
+  <body>
+    <main class="page">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">IoT Patient Telemetry</p>
+          <h1>Smart Health Monitoring</h1>
+        </div>
+        <a class="api-link" href="/api/latest">JSON</a>
+      </header>
+
+      <section class="table-shell" aria-label="Latest patient readings">
+        <table>
+          <thead>
+            <tr>
+              <th>Patient</th>
+              <th>Status</th>
+              <th>Time</th>
+              <th>Heart Rate</th>
+              <th>SpO2</th>
+              <th>Temp</th>
+              <th>Blood Pressure</th>
+              <th>Resp. Rate</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for reading in readings %}
+              <tr>
+                <td>{{ reading.patient_id }}</td>
+                <td><span class="status status-{{ reading.status|lower }}">{{ reading.status }}</span></td>
+                <td>{{ reading.reading_time or "-" }}</td>
+                <td>{{ reading.heart_rate or "-" }}{% if reading.heart_rate %} bpm{% endif %}</td>
+                <td>{{ reading.spo2 or "-" }}{% if reading.spo2 %}%{% endif %}</td>
+                <td>{{ reading.temperature or "-" }}{% if reading.temperature %} C{% endif %}</td>
+                <td>
+                  {% if reading.systolic_bp %}
+                    {{ reading.systolic_bp }}/{{ reading.diastolic_bp }} mmHg
+                  {% else %}
+                    -
+                  {% endif %}
+                </td>
+                <td>{{ reading.respiratory_rate or "-" }}{% if reading.respiratory_rate %} /min{% endif %}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </section>
+    </main>
+  </body>
+</html>

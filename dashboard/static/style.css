@@ -1,0 +1,145 @@
+:root {
+  color-scheme: light;
+  --bg: #f7f8fb;
+  --panel: #ffffff;
+  --text: #202733;
+  --muted: #657184;
+  --line: #d9dee8;
+  --normal: #19764b;
+  --warning: #9a6500;
+  --critical: #b12d2d;
+  --emergency: #7c1d4f;
+  --waiting: #56616f;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+.page {
+  width: min(1180px, calc(100% - 32px));
+  margin: 32px auto;
+}
+
+.topbar {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.eyebrow {
+  margin: 0 0 6px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+h1 {
+  margin: 0;
+  font-size: 30px;
+  line-height: 1.15;
+}
+
+.api-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--text);
+  background: var(--panel);
+  text-decoration: none;
+  font-weight: 700;
+}
+
+.table-shell {
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+table {
+  width: 100%;
+  min-width: 900px;
+  border-collapse: collapse;
+}
+
+th,
+td {
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+th {
+  color: var(--muted);
+  background: #eef1f6;
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 0 10px;
+  border-radius: 999px;
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.status-normal {
+  background: var(--normal);
+}
+
+.status-warning {
+  background: var(--warning);
+}
+
+.status-critical {
+  background: var(--critical);
+}
+
+.status-emergency {
+  background: var(--emergency);
+}
+
+.status-waiting {
+  background: var(--waiting);
+}
+
+@media (max-width: 700px) {
+  .page {
+    width: min(100% - 20px, 1180px);
+    margin: 20px auto;
+  }
+
+  .topbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  h1 {
+    font-size: 24px;
+  }
+}

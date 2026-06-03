@@ -1,0 +1,156 @@
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.1
+    container_name: smart-health-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.1
+    container_name: smart-health-kafka
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092,PLAINTEXT_HOST://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-topics --bootstrap-server localhost:9092 --list >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 10s
+      retries: 12
+
+  cassandra:
+    image: cassandra:4.1
+    container_name: smart-health-cassandra
+    ports:
+      - "9042:9042"
+    environment:
+      CASSANDRA_CLUSTER_NAME: SmartHealthCluster
+      CASSANDRA_DC: datacenter1
+      CASSANDRA_ENDPOINT_SNITCH: GossipingPropertyFileSnitch
+      MAX_HEAP_SIZE: 512M
+      HEAP_NEWSIZE: 100M
+    volumes:
+      - cassandra-data:/var/lib/cassandra
+    healthcheck:
+      test: ["CMD-SHELL", "cqlsh -e 'DESCRIBE KEYSPACES' >/dev/null 2>&1"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+
+  cassandra-init:
+    image: cassandra:4.1
+    container_name: smart-health-cassandra-init
+    depends_on:
+      cassandra:
+        condition: service_healthy
+    volumes:
+      - ./cassandra/init.cql:/schema/init.cql:ro
+    command: /bin/sh -c "cqlsh cassandra -f /schema/init.cql"
+    restart: "no"
+
+  spark-master:
+    image: bitnamilegacy/spark:3.5.1
+    container_name: smart-health-spark-master
+    environment:
+      SPARK_MODE: master
+      SPARK_RPC_AUTHENTICATION_ENABLED: "no"
+      SPARK_RPC_ENCRYPTION_ENABLED: "no"
+      SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED: "no"
+      SPARK_SSL_ENABLED: "no"
+    ports:
+      - "7077:7077"
+      - "8080:8080"
+
+  spark-worker:
+    image: bitnamilegacy/spark:3.5.1
+    container_name: smart-health-spark-worker
+    depends_on:
+      - spark-master
+    environment:
+      SPARK_MODE: worker
+      SPARK_MASTER_URL: spark://spark-master:7077
+      SPARK_WORKER_MEMORY: 1G
+      SPARK_WORKER_CORES: 1
+      SPARK_RPC_AUTHENTICATION_ENABLED: "no"
+      SPARK_RPC_ENCRYPTION_ENABLED: "no"
+      SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED: "no"
+      SPARK_SSL_ENABLED: "no"
+
+  spark-streaming:
+    image: bitnamilegacy/spark:3.5.1
+    container_name: smart-health-spark-streaming
+    depends_on:
+      kafka:
+        condition: service_healthy
+      cassandra-init:
+        condition: service_completed_successfully
+      spark-master:
+        condition: service_started
+      spark-worker:
+        condition: service_started
+    volumes:
+      - ./spark:/app:ro
+    environment:
+      HOME: /tmp
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      KAFKA_TOPIC: smart-health-data
+      CASSANDRA_HOST: cassandra
+      CASSANDRA_KEYSPACE: smart_health
+      CASSANDRA_TABLE: sensor_readings
+    command:
+      - /bin/bash
+      - -c
+      - >
+        /opt/bitnami/spark/bin/spark-submit
+        --master spark://spark-master:7077
+        --driver-memory 512m
+        --executor-memory 512m
+        --conf spark.executor.cores=1
+        --conf spark.cores.max=1
+        --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1,com.datastax.spark:spark-cassandra-connector_2.12:3.5.1
+        --conf spark.jars.ivy=/tmp/.ivy2
+        --conf spark.cassandra.connection.host=$$CASSANDRA_HOST
+        --conf spark.sql.streaming.checkpointLocation=/tmp/smart-health-checkpoint
+        /app/streaming_job.py
+    restart: on-failure
+
+  producer:
+    build: ./producer
+    container_name: smart-health-producer
+    depends_on:
+      kafka:
+        condition: service_healthy
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      KAFKA_TOPIC: smart-health-data
+      SIMULATION_INTERVAL_SECONDS: 3
+    restart: unless-stopped
+
+  dashboard:
+    build: ./dashboard
+    container_name: smart-health-dashboard
+    depends_on:
+      cassandra-init:
+        condition: service_completed_successfully
+    environment:
+      CASSANDRA_HOST: cassandra
+      CASSANDRA_KEYSPACE: smart_health
+      PATIENT_IDS: patient-1,patient-2,patient-3,patient-4,patient-5
+    ports:
+      - "5000:5000"
+    restart: unless-stopped
+
+volumes:
+  cassandra-data:
