@@ -11,47 +11,153 @@
     <main class="page">
       <header class="topbar">
         <div>
-          <p class="eyebrow">IoT Patient Telemetry</p>
+          <p class="eyebrow">Real-Time IoT Telemetry</p>
           <h1>Smart Health Monitoring</h1>
         </div>
-        <a class="api-link" href="/api/latest">JSON</a>
+        <nav class="links" aria-label="API links">
+          <a href="/api/latest">Latest JSON</a>
+          <a href="/api/alerts">Alerts JSON</a>
+        </nav>
       </header>
 
-      <section class="table-shell" aria-label="Latest patient readings">
-        <table>
-          <thead>
-            <tr>
-              <th>Patient</th>
-              <th>Status</th>
-              <th>Time</th>
-              <th>Heart Rate</th>
-              <th>SpO2</th>
-              <th>Temp</th>
-              <th>Blood Pressure</th>
-              <th>Resp. Rate</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for reading in readings %}
-              <tr>
-                <td>{{ reading.patient_id }}</td>
-                <td><span class="status status-{{ reading.status|lower }}">{{ reading.status }}</span></td>
-                <td>{{ reading.reading_time or "-" }}</td>
-                <td>{{ reading.heart_rate or "-" }}{% if reading.heart_rate %} bpm{% endif %}</td>
-                <td>{{ reading.spo2 or "-" }}{% if reading.spo2 %}%{% endif %}</td>
-                <td>{{ reading.temperature or "-" }}{% if reading.temperature %} C{% endif %}</td>
-                <td>
-                  {% if reading.systolic_bp %}
-                    {{ reading.systolic_bp }}/{{ reading.diastolic_bp }} mmHg
+      {% if cassandra_error %}
+        <section class="notice">
+          Cassandra is warming up. The dashboard will keep retrying.
+        </section>
+      {% endif %}
+
+      <section aria-label="Latest patient status">
+        <div class="section-head">
+          <h2>Latest Patient Status</h2>
+        </div>
+        <div class="status-grid">
+          {% for reading in latest %}
+            {% set status = reading.predicted_status or "WAITING" %}
+            {% set severity = reading.alert_severity or "NONE" %}
+            <article class="patient-card status-border-{{ status|lower }}">
+              <div class="card-top">
+                <div>
+                  <h3>{{ reading.patient_id }}</h3>
+                  <p>{{ reading.reading_time or "Waiting for data" }}</p>
+                </div>
+                <span class="badge status-{{ status|lower }}">{{ status }}</span>
+              </div>
+              <div class="metric-row">
+                <span>Risk</span>
+                <strong>
+                  {% if reading.risk_score is not none and reading.risk_score is defined %}
+                    {{ "%.1f"|format(reading.risk_score) }}
                   {% else %}
                     -
                   {% endif %}
-                </td>
-                <td>{{ reading.respiratory_rate or "-" }}{% if reading.respiratory_rate %} /min{% endif %}</td>
+                </strong>
+              </div>
+              <div class="metric-row">
+                <span>Level</span>
+                <strong>{{ reading.risk_level or "-" }}</strong>
+              </div>
+              <div class="vitals">
+                <span><b>{{ reading.heart_rate or "-" }}</b> bpm</span>
+                <span><b>{{ reading.spo2 or "-" }}</b>% SpO2</span>
+                <span><b>{{ reading.temperature or "-" }}</b> C</span>
+                <span><b>{{ reading.systolic_bp or "-" }}/{{ reading.diastolic_bp or "-" }}</b> BP</span>
+                <span><b>{{ reading.respiratory_rate or "-" }}</b> resp/min</span>
+                <span><b>{{ reading.glucose_level or "-" }}</b> glucose</span>
+              </div>
+              <div class="details">
+                <span>Anomaly: {{ reading.is_anomaly if reading.is_anomaly is not none else "-" }}</span>
+                <span>Score: {{ reading.anomaly_score if reading.anomaly_score is not none else "-" }}</span>
+                <span>Next HR: {{ reading.predicted_next_heart_rate if reading.predicted_next_heart_rate is defined else "-" }}</span>
+                <span>Battery: {{ reading.battery_level if reading.battery_level is not none else "-" }}%</span>
+              </div>
+              <p class="alert-text severity-{{ severity|lower }}">{{ reading.alert_message or "No alert." }}</p>
+            </article>
+          {% endfor %}
+        </div>
+      </section>
+
+      <section aria-label="Critical alerts">
+        <div class="section-head">
+          <h2>Critical Alerts</h2>
+        </div>
+        <div class="table-shell">
+          <table>
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Patient</th>
+                <th>Severity</th>
+                <th>Type</th>
+                <th>Status</th>
+                <th>Risk</th>
+                <th>Message</th>
               </tr>
-            {% endfor %}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {% for alert in alerts %}
+                <tr>
+                  <td>{{ alert.alert_time or "-" }}</td>
+                  <td>{{ alert.patient_id }}</td>
+                  <td><span class="badge severity-{{ (alert.alert_severity or "none")|lower }}">{{ alert.alert_severity }}</span></td>
+                  <td>{{ alert.alert_type }}</td>
+                  <td>{{ alert.predicted_status }}</td>
+                  <td>{{ "%.1f"|format(alert.risk_score or 0) }}</td>
+                  <td class="message-cell">{{ alert.alert_message }}</td>
+                </tr>
+              {% else %}
+                <tr>
+                  <td colspan="7" class="empty">No alerts yet.</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section aria-label="Recent readings">
+        <div class="section-head">
+          <h2>Recent Readings</h2>
+        </div>
+        <div class="table-shell">
+          <table>
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Patient</th>
+                <th>Status</th>
+                <th>Risk</th>
+                <th>HR</th>
+                <th>Next HR</th>
+                <th>SpO2</th>
+                <th>Temp</th>
+                <th>BP</th>
+                <th>Anomaly</th>
+                <th>Alert</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for reading in readings %}
+                <tr>
+                  <td>{{ reading.reading_time or "-" }}</td>
+                  <td>{{ reading.patient_id }}</td>
+                  <td><span class="badge status-{{ (reading.predicted_status or "waiting")|lower }}">{{ reading.predicted_status }}</span></td>
+                  <td>{{ "%.1f"|format(reading.risk_score or 0) }}</td>
+                  <td>{{ reading.heart_rate or "-" }}</td>
+                  <td>{{ reading.predicted_next_heart_rate or "-" }}</td>
+                  <td>{{ reading.spo2 or "-" }}</td>
+                  <td>{{ reading.temperature or "-" }}</td>
+                  <td>{{ reading.systolic_bp or "-" }}/{{ reading.diastolic_bp or "-" }}</td>
+                  <td>{{ reading.is_anomaly }}</td>
+                  <td>{{ reading.alert_type }}</td>
+                </tr>
+              {% else %}
+                <tr>
+                  <td colspan="11" class="empty">Waiting for enriched readings.</td>
+                </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
       </section>
     </main>
   </body>

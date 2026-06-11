@@ -2,17 +2,27 @@ services:
   zookeeper:
     image: confluentinc/cp-zookeeper:7.6.1
     container_name: smart-health-zookeeper
+    mem_limit: 512m
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
+      KAFKA_HEAP_OPTS: "-Xmx256M -Xms128M"
     ports:
       - "2181:2181"
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 2181"]
+      start_period: 10s
+      interval: 5s
+      timeout: 5s
+      retries: 20
 
   kafka:
     image: confluentinc/cp-kafka:7.6.1
     container_name: smart-health-kafka
+    mem_limit: 1g
     depends_on:
-      - zookeeper
+      zookeeper:
+        condition: service_healthy
     ports:
       - "9092:9092"
     environment:
@@ -24,6 +34,7 @@ services:
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_HEAP_OPTS: "-Xmx512M -Xms256M"
     healthcheck:
       test: ["CMD-SHELL", "kafka-topics --bootstrap-server localhost:9092 --list >/dev/null 2>&1"]
       interval: 10s
@@ -33,6 +44,7 @@ services:
   cassandra:
     image: cassandra:4.1
     container_name: smart-health-cassandra
+    mem_limit: 1g
     ports:
       - "9042:9042"
     environment:
@@ -52,6 +64,7 @@ services:
   cassandra-init:
     image: cassandra:4.1
     container_name: smart-health-cassandra-init
+    mem_limit: 512m
     depends_on:
       cassandra:
         condition: service_healthy
@@ -63,12 +76,14 @@ services:
   spark-master:
     image: bitnamilegacy/spark:3.5.1
     container_name: smart-health-spark-master
+    mem_limit: 512m
     environment:
       SPARK_MODE: master
       SPARK_RPC_AUTHENTICATION_ENABLED: "no"
       SPARK_RPC_ENCRYPTION_ENABLED: "no"
       SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED: "no"
       SPARK_SSL_ENABLED: "no"
+      SPARK_DAEMON_MEMORY: 384m
     ports:
       - "7077:7077"
       - "8080:8080"
@@ -76,21 +91,25 @@ services:
   spark-worker:
     image: bitnamilegacy/spark:3.5.1
     container_name: smart-health-spark-worker
+    mem_limit: 1g
     depends_on:
       - spark-master
     environment:
       SPARK_MODE: worker
       SPARK_MASTER_URL: spark://spark-master:7077
-      SPARK_WORKER_MEMORY: 1G
+      SPARK_WORKER_MEMORY: 768m
       SPARK_WORKER_CORES: 1
+      SPARK_DAEMON_MEMORY: 384m
       SPARK_RPC_AUTHENTICATION_ENABLED: "no"
       SPARK_RPC_ENCRYPTION_ENABLED: "no"
       SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED: "no"
       SPARK_SSL_ENABLED: "no"
 
   spark-streaming:
-    image: bitnamilegacy/spark:3.5.1
+    build: ./spark
+    image: smart-health-spark-ml:latest
     container_name: smart-health-spark-streaming
+    mem_limit: 2g
     depends_on:
       kafka:
         condition: service_healthy
@@ -102,13 +121,17 @@ services:
         condition: service_started
     volumes:
       - ./spark:/app:ro
+      - ./ml:/ml:ro
+      - ./models:/models:ro
     environment:
       HOME: /tmp
+      PYTHONPATH: /ml:/app
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
       KAFKA_TOPIC: smart-health-data
       CASSANDRA_HOST: cassandra
       CASSANDRA_KEYSPACE: smart_health
-      CASSANDRA_TABLE: sensor_readings
+      MODEL_DIR: /models
+      CHECKPOINT_LOCATION: /tmp/smart-health-checkpoint
     command:
       - /bin/bash
       - -c
@@ -119,6 +142,8 @@ services:
         --executor-memory 512m
         --conf spark.executor.cores=1
         --conf spark.cores.max=1
+        --conf spark.driver.memoryOverhead=256m
+        --conf spark.executor.memoryOverhead=256m
         --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1,com.datastax.spark:spark-cassandra-connector_2.12:3.5.1
         --conf spark.jars.ivy=/tmp/.ivy2
         --conf spark.cassandra.connection.host=$$CASSANDRA_HOST
@@ -129,6 +154,7 @@ services:
   producer:
     build: ./producer
     container_name: smart-health-producer
+    mem_limit: 256m
     depends_on:
       kafka:
         condition: service_healthy
@@ -141,6 +167,7 @@ services:
   dashboard:
     build: ./dashboard
     container_name: smart-health-dashboard
+    mem_limit: 512m
     depends_on:
       cassandra-init:
         condition: service_completed_successfully

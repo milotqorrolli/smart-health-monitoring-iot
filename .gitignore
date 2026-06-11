@@ -18,5 +18,8 @@ spark-warehouse/
 metastore_db/
 derby.log
 
+# Generated ML artifacts. Recreate with `python ml/train_models.py`.
+models/
+
 .idea/
 .vscode/
