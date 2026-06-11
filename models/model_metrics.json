@@ -1,0 +1,37 @@
+{
+  "status_classifier": {
+    "accuracy": 0.9999615414198908,
+    "precision": 0.9999423155176603,
+    "recall": 0.9999615414198908,
+    "f1_score": 0.9999519276218941,
+    "classes": [
+      "CRITICAL",
+      "EMERGENCY",
+      "NORMAL",
+      "WARNING"
+    ],
+    "training_samples": 208016,
+    "test_samples": 52004
+  },
+  "risk_regressor": {
+    "mae": 0.6812474841772774,
+    "rmse": 3.8153749983633025,
+    "r2_score": 0.980179792555688,
+    "training_samples": 168016,
+    "test_samples": 42004
+  },
+  "anomaly_detector": {
+    "anomalies_detected": 3500,
+    "anomaly_rate": 0.05,
+    "min_anomaly_score": -0.6844911361036745,
+    "max_anomaly_score": -0.3620358609528597,
+    "training_samples": 70000
+  },
+  "heart_rate_forecaster": {
+    "mae": 0.9090529739843424,
+    "rmse": 1.6913712280506068,
+    "r2_score": 0.24431951533122942,
+    "training_samples": 1440,
+    "test_samples": 360
+  }
+}

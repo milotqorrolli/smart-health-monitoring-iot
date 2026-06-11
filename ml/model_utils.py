@@ -88,6 +88,7 @@ CATEGORICAL_FEATURES = [
     "chronic_condition",
     "smoker",
     "medication",
+    "predicted_disease_simulated",
 ]
 
 NUMERIC_FEATURES = [f for f in ALL_INPUT_FEATURES if f not in CATEGORICAL_FEATURES and f != "fall_detected"]

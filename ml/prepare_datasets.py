@@ -14,6 +14,7 @@ import logging
 from model_utils import (
     derive_status,
     ALL_INPUT_FEATURES,
+    VITAL_FEATURES,
     get_default_values,
 )
 

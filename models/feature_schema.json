@@ -1,0 +1,119 @@
+{
+  "input_features": [
+    "age",
+    "gender",
+    "weight",
+    "height",
+    "bmi",
+    "heart_rate",
+    "spo2",
+    "temperature",
+    "systolic_bp",
+    "diastolic_bp",
+    "respiratory_rate",
+    "glucose_level",
+    "skin_temperature",
+    "activity_level",
+    "exercise_type",
+    "exercise_intensity",
+    "steps",
+    "stress_level",
+    "sleep_duration",
+    "sleep_quality",
+    "screen_time",
+    "notifications_received",
+    "fall_detected",
+    "battery_level",
+    "chronic_condition",
+    "smoker",
+    "medication",
+    "predicted_disease_simulated"
+  ],
+  "demographic_features": [
+    "age",
+    "gender",
+    "weight",
+    "height",
+    "bmi"
+  ],
+  "vital_features": [
+    "heart_rate",
+    "spo2",
+    "temperature",
+    "systolic_bp",
+    "diastolic_bp",
+    "respiratory_rate",
+    "glucose_level",
+    "skin_temperature"
+  ],
+  "activity_features": [
+    "activity_level",
+    "exercise_type",
+    "exercise_intensity",
+    "steps",
+    "stress_level",
+    "sleep_duration",
+    "sleep_quality",
+    "screen_time",
+    "notifications_received"
+  ],
+  "sensor_features": [
+    "fall_detected",
+    "battery_level"
+  ],
+  "medical_features": [
+    "chronic_condition",
+    "smoker",
+    "medication",
+    "predicted_disease_simulated"
+  ],
+  "categorical_features": [
+    "gender",
+    "activity_level",
+    "exercise_type",
+    "exercise_intensity",
+    "stress_level",
+    "sleep_quality",
+    "chronic_condition",
+    "smoker",
+    "medication",
+    "predicted_disease_simulated"
+  ],
+  "numeric_features": [
+    "age",
+    "weight",
+    "height",
+    "bmi",
+    "heart_rate",
+    "spo2",
+    "temperature",
+    "systolic_bp",
+    "diastolic_bp",
+    "respiratory_rate",
+    "glucose_level",
+    "skin_temperature",
+    "steps",
+    "sleep_duration",
+    "screen_time",
+    "notifications_received",
+    "battery_level"
+  ],
+  "boolean_features": [
+    "fall_detected"
+  ],
+  "output_features": [
+    "predicted_status",
+    "risk_score",
+    "risk_level",
+    "is_anomaly",
+    "anomaly_score",
+    "anomaly_type",
+    "predicted_next_heart_rate",
+    "alert_type",
+    "alert_severity",
+    "alert_message",
+    "model_version"
+  ],
+  "total_input_features": 28,
+  "total_output_features": 11
+}
