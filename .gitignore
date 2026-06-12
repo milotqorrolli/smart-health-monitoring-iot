@@ -11,15 +11,16 @@ __pycache__/
 *.log
 logs/
 
+# ML Models (generated - retrain with: python ml/train_models.py)
+models/*.pkl
+models/model_metrics.json
+
 .DS_Store
 Thumbs.db
 
 spark-warehouse/
 metastore_db/
 derby.log
-
-# Generated ML artifacts. Recreate with `python ml/train_models.py`.
-models/
 
 .idea/
 .vscode/

@@ -1,85 +1,78 @@
 # Datasets
 
-Medical disclaimer: datasets in this project are used for an educational simulation. Most are synthetic or simplified and should not be interpreted as clinically valid.
+## Summary
 
-Run the audit:
+The project contains 14 dataset files. 8 are used for ML training, 6 are excluded.
 
-```bash
-python ml/data_audit.py
-```
+| # | Dataset | Rows | Status | Use Case |
+|---|---------|------|--------|----------|
+| 1 | Synthetic_patient-HealthCare-Monitoring_dataset.csv | ~1000 | USED | Primary — vitals, alerts, status |
+| 2 | human_vital_signs_dataset_2024.csv | ~5000 | USED | Primary — risk classification |
+| 3 | personal_health_data.csv | ~10000 | USED | Primary — anomaly detection |
+| 4 | patients_data_with_alerts.xlsx | ~500 | USED | Secondary — alert labels |
+| 5 | healthcare_iot_target_dataset_5000.csv | 5000 | USED | Secondary — IoT targets |
+| 6 | heart_rate.csv | ~50 | USED | Primary — HR forecasting |
+| 7 | Oxygen Dataset Final.csv | ~1000 | USED | Secondary — SpO2 anomaly |
+| 8 | Health data.csv | ~500 | USED | Supplementary — basic vitals |
+| 9 | digital_interaction_data.csv | - | EXCLUDED | Digital behavior, not health sensors |
+| 10 | activity_environment_data.csv | - | EXCLUDED | Environmental data, not physiological |
+| 11 | healthcare_patient_journey.csv | - | EXCLUDED | Hospital administrative data |
+| 12 | Synthetic-Infant-Health-Data.csv | - | EXCLUDED | Pediatric cardiac, not adult IoT |
+| 13 | diabetes_dataset.csv | - | EXCLUDED | Static disease classification |
+| 14 | updated_version.csv | - | EXCLUDED | Cardiovascular risk/cholesterol |
 
-The script prints each dataset name, shape, columns, missing values, selected use case, use/ignore decision, and reason. It also writes `models/dataset_audit.json`.
-
-## Used Datasets
+## Column Name Mappings
 
 ### Synthetic_patient-HealthCare-Monitoring_dataset.csv
-
-Used for vital signs, fall detection, alert labels, predicted disease, and status target engineering. It maps directly to the simulated patient monitoring problem.
-
-### patients_data_with_alerts.xlsx
-
-Used for additional alert labels and status classification training. It follows the same structure as the synthetic patient monitoring dataset.
+- "Heart Rate (bpm)" → heart_rate
+- "SpO2 Level (%)" → spo2
+- "Systolic Blood Pressure (mmHg)" → systolic_bp
+- "Diastolic Blood Pressure (mmHg)" → diastolic_bp
+- "Body Temperature (°C)" → temperature
+- "Fall Detection" → fall_detected (Yes→True, No→False)
 
 ### human_vital_signs_dataset_2024.csv
-
-Used for heart rate, respiratory rate, body temperature, oxygen saturation, blood pressure, age, gender, weight, height, derived BMI, and risk category classification.
+- "Oxygen Saturation" → spo2
+- "Body Temperature" → temperature
+- "Weight (kg)" → weight
+- "Height (m)" → height (already in meters)
+- "Risk Category" → risk_score (Low=25, Medium=55, High=80, Critical=95)
 
 ### personal_health_data.csv
+- "Heart_Rate" → heart_rate
+- "Blood_Oxygen_Level" → spo2
+- "Skin_Temperature" → skin_temperature
+- "Health_Score" → risk_score = 100 - Health_Score
+- "Anomaly_Flag" → supervised anomaly label
+- **Height: IN CENTIMETERS — divided by 100 before use**
 
-Used for wearable health context, `Health_Score`, `Anomaly_Flag`, sleep, stress, ECG-adjacent context, blood oxygen, and skin temperature. The risk target is derived as:
-
-```text
-risk_score = 100 - Health_Score
-```
-
-### activity_environment_data.csv
-
-Used for steps, exercise type, exercise intensity, battery level, and environmental context. It is joined to `personal_health_data.csv` by `User_ID` and `Timestamp`.
-
-### digital_interaction_data.csv
-
-Used for notifications received and screen time. It is joined to `personal_health_data.csv` by `User_ID` and `Timestamp`.
+### patients_data_with_alerts.xlsx
+- Same column names as Synthetic_patient dataset
+- **Alert labels normalized to uppercase**: Normal→NORMAL, Abnormal→ABNORMAL
 
 ### healthcare_iot_target_dataset_5000.csv
-
-Used for IoT sensor target health status, target blood pressure, target heart rate, battery level, and sensor-related context.
-
-### heart_rate.csv
-
-Used for heart-rate forecasting. Each time-series column is converted into supervised lag rows with five lag features and a next-heart-rate target.
-
-### Health data.csv
-
-Used as lightweight auxiliary data for pulse, body temperature, SpO2, and status.
+- "Temperature (°C)" → temperature
+- "Heart_Rate (bpm)" → heart_rate
+- "Device_Battery_Level (%)" → battery_level
+- "Target_Health_Status" → Healthy=NORMAL, Unhealthy=WARNING
 
 ### Oxygen Dataset Final.csv
+- "spo2" → spo2
+- "pr" → heart_rate (pulse rate as proxy)
+- "oxy_flow" → supplemental oxygen feature
+- **Critical: Apply SimpleImputer(median) — many null values**
 
-Used as optional oxygen and pulse enrichment for SpO2-related patterns.
+### heart_rate.csv
+- Columns T1, T2, T3, T4 — independent time series
+- Stacked into supervised lag dataset
 
-### diabetes_dataset.csv
+## Data Normalization Notes
 
-Used only for optional risk enrichment. It contributes glucose, BMI, blood pressure, smoking, sleep, screen time, and diabetes risk score context. It is not the main monitoring target.
+1. **Height normalization:** personal_health_data.csv stores height in cm. If max(height) > 3.0, divide by 100.
+2. **Alert label normalization:** patients_data_with_alerts.xlsx uses mixed case. Map all to uppercase.
+3. **Missing value imputation:** Oxygen Dataset Final.csv has significant nulls — use median imputation.
+4. **Heart rate dataset size:** May have few rows after lag creation. Still train model for demo.
 
-### updated_version.csv
+## Statement
 
-Used only for optional cardiovascular risk enrichment through age, sex, blood pressure, smoking, diabetes, and heart attack target fields.
-
-## Ignored For Main Pipeline
-
-### Synthetic-Infant-Health-Data.csv
-
-Ignored in the main version because it is pediatric/infant disease data and does not align with the adult smart health monitoring simulator.
-
-### healthcare_patient_journey.csv
-
-Ignored in the real-time sensor pipeline because it is administrative hospital journey data, not streaming IoT telemetry. It can be described as future work for hospital operations analytics.
-
-## Mapping Strategy
-
-When a dataset does not match the unified schema exactly:
-
-- map usable columns to the canonical field names
-- fill missing fields with practical defaults
-- derive labels from vital-sign thresholds
-- document the decision in the audit and docs
-- avoid forcing unrelated datasets into the main streaming target
+All datasets used in this project are synthetic or publicly available educational data. No real patient data is used. This project is for educational purposes only.

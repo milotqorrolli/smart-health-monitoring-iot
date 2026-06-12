@@ -1,7 +1,11 @@
-from __future__ import annotations
+"""
+Model Evaluation Script for Smart Health Monitoring IoT System.
+Loads trained models and prints comprehensive evaluation metrics.
+"""
 
 import json
-from pathlib import Path
+import os
+import sys
 
 import joblib
 import numpy as np
@@ -9,6 +13,7 @@ import pandas as pd
 from sklearn.metrics import (
     accuracy_score,
     classification_report,
+    confusion_matrix,
     f1_score,
     mean_absolute_error,
     mean_squared_error,
@@ -17,70 +22,161 @@ from sklearn.metrics import (
     recall_score,
 )
 
-try:
-    from .model_utils import MODEL_FEATURES, STATUS_LABELS
-    from .prepare_datasets import MODEL_DIR, build_forecasting_dataset, load_all_training_data
-except ImportError:
-    from model_utils import MODEL_FEATURES, STATUS_LABELS
-    from prepare_datasets import MODEL_DIR, build_forecasting_dataset, load_all_training_data
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from prepare_datasets import (
+    prepare_anomaly_detection_data,
+    prepare_heart_rate_forecasting_data,
+    prepare_risk_regression_data,
+    prepare_status_classification_data,
+)
+
+MODELS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "models")
 
 
-def regression_metrics(y_true: pd.Series, y_pred: np.ndarray) -> dict[str, float]:
-    return {
-        "mae": float(mean_absolute_error(y_true, y_pred)),
-        "rmse": float(np.sqrt(mean_squared_error(y_true, y_pred))),
-        "r2": float(r2_score(y_true, y_pred)),
-    }
+def evaluate_status_classifier():
+    """Evaluate the status classification model."""
+    print("\n" + "=" * 60)
+    print("  EVALUATION: Status Classifier")
+    print("=" * 60)
+
+    model_path = os.path.join(MODELS_DIR, "status_classifier.pkl")
+    if not os.path.exists(model_path):
+        print("  Model not found. Run train_models.py first.")
+        return
+
+    model = joblib.load(model_path)
+    df = prepare_status_classification_data()
+    if df.empty:
+        return
+
+    feature_cols = [c for c in df.columns if c != "status"]
+    X = df[feature_cols]
+    y = df["status"]
+
+    predictions = model.predict(X)
+
+    print(f"  Accuracy: {accuracy_score(y, predictions):.4f}")
+    print(f"  Precision (macro): {precision_score(y, predictions, average='macro', zero_division=0):.4f}")
+    print(f"  Recall (macro): {recall_score(y, predictions, average='macro', zero_division=0):.4f}")
+    print(f"  F1 (macro): {f1_score(y, predictions, average='macro', zero_division=0):.4f}")
+    print(f"\n  Confusion Matrix:\n{confusion_matrix(y, predictions)}")
+    print(f"\n  Classification Report:\n{classification_report(y, predictions, zero_division=0)}")
 
 
-def load_model(name: str):
-    path = MODEL_DIR / name
-    if not path.exists():
-        raise FileNotFoundError(f"Missing model artifact: {path}")
-    return joblib.load(path)
+def evaluate_risk_regressor():
+    """Evaluate the risk regression model."""
+    print("\n" + "=" * 60)
+    print("  EVALUATION: Risk Regressor")
+    print("=" * 60)
+
+    model_path = os.path.join(MODELS_DIR, "risk_regressor.pkl")
+    if not os.path.exists(model_path):
+        print("  Model not found. Run train_models.py first.")
+        return
+
+    model = joblib.load(model_path)
+    df = prepare_risk_regression_data()
+    if df.empty:
+        return
+
+    feature_cols = [c for c in df.columns if c != "risk_score"]
+    X = df[feature_cols]
+    y = df["risk_score"]
+
+    predictions = model.predict(X)
+
+    mae = mean_absolute_error(y, predictions)
+    rmse = np.sqrt(mean_squared_error(y, predictions))
+    r2 = r2_score(y, predictions)
+
+    print(f"  MAE: {mae:.4f}")
+    print(f"  RMSE: {rmse:.4f}")
+    print(f"  R2: {r2:.4f}")
 
 
-def main() -> None:
-    data = load_all_training_data()
-    x = data[MODEL_FEATURES]
-    metrics = {}
+def evaluate_anomaly_detector():
+    """Evaluate the anomaly detection model."""
+    print("\n" + "=" * 60)
+    print("  EVALUATION: Anomaly Detector")
+    print("=" * 60)
 
-    status_model = load_model("status_classifier.pkl")
-    status_pred = status_model.predict(x)
-    status_true = data["target_status"].astype(str).str.upper()
-    metrics["status_classifier"] = {
-        "accuracy": float(accuracy_score(status_true, status_pred)),
-        "precision_macro": float(precision_score(status_true, status_pred, average="macro", zero_division=0)),
-        "recall_macro": float(recall_score(status_true, status_pred, average="macro", zero_division=0)),
-        "f1_macro": float(f1_score(status_true, status_pred, average="macro", zero_division=0)),
-        "classification_report": classification_report(status_true, status_pred, labels=STATUS_LABELS, zero_division=0, output_dict=True),
-    }
+    model_path = os.path.join(MODELS_DIR, "anomaly_detector.pkl")
+    if not os.path.exists(model_path):
+        print("  Model not found. Run train_models.py first.")
+        return
 
-    risk_model = load_model("risk_regressor.pkl")
-    risk_true = pd.to_numeric(data["risk_score_target"], errors="coerce").fillna(50).clip(0, 100)
-    risk_pred = np.clip(risk_model.predict(x), 0, 100)
-    metrics["risk_regressor"] = regression_metrics(risk_true, risk_pred)
+    model = joblib.load(model_path)
+    df, labels = prepare_anomaly_detection_data()
+    if df.empty:
+        return
 
-    anomaly_model = load_model("anomaly_detector.pkl")
-    anomaly_true = pd.to_numeric(data["anomaly_label"], errors="coerce").fillna(0).astype(int)
-    anomaly_pred = (anomaly_model.predict(x) == -1).astype(int)
-    metrics["anomaly_detector"] = {
-        "precision": float(precision_score(anomaly_true, anomaly_pred, zero_division=0)),
-        "recall": float(recall_score(anomaly_true, anomaly_pred, zero_division=0)),
-        "f1": float(f1_score(anomaly_true, anomaly_pred, zero_division=0)),
-        "predicted_anomaly_rate": float(anomaly_pred.mean()),
-    }
+    predictions = model.predict(df)
+    n_anomalies = (predictions == -1).sum()
 
-    forecast = build_forecasting_dataset()
-    forecast_model = load_model("heart_rate_forecaster.pkl")
-    forecast_features = ["hr_lag_1", "hr_lag_2", "hr_lag_3", "hr_lag_4", "hr_lag_5"]
-    forecast_pred = forecast_model.predict(forecast[forecast_features])
-    metrics["heart_rate_forecaster"] = regression_metrics(forecast["next_heart_rate"], forecast_pred)
+    print(f"  Total samples: {len(predictions)}")
+    print(f"  Anomalies detected: {n_anomalies}")
+    print(f"  Contamination ratio: {n_anomalies / len(predictions):.4f}")
 
-    output_path = MODEL_DIR / "model_metrics_latest_eval.json"
-    output_path.write_text(json.dumps(metrics, indent=2, ensure_ascii=True), encoding="utf-8")
-    print(json.dumps(metrics, indent=2, ensure_ascii=True))
-    print(f"Saved evaluation metrics to {output_path}")
+    if labels is not None and labels.sum() > 0:
+        iso_labels = (predictions == -1).astype(int)
+        labels_binary = labels.values[:len(iso_labels)].astype(int)
+        print(f"  Precision: {precision_score(labels_binary, iso_labels, zero_division=0):.4f}")
+        print(f"  Recall: {recall_score(labels_binary, iso_labels, zero_division=0):.4f}")
+        print(f"  F1: {f1_score(labels_binary, iso_labels, zero_division=0):.4f}")
+
+
+def evaluate_heart_rate_forecaster():
+    """Evaluate the heart rate forecasting model."""
+    print("\n" + "=" * 60)
+    print("  EVALUATION: Heart Rate Forecaster")
+    print("=" * 60)
+
+    model_path = os.path.join(MODELS_DIR, "heart_rate_forecaster.pkl")
+    if not os.path.exists(model_path):
+        print("  Model not found. Run train_models.py first.")
+        return
+
+    model = joblib.load(model_path)
+    df = prepare_heart_rate_forecasting_data()
+    if df.empty:
+        return
+
+    feature_cols = [c for c in df.columns if c != "next_heart_rate"]
+    X = df[feature_cols]
+    y = df["next_heart_rate"]
+
+    predictions = model.predict(X)
+
+    mae = mean_absolute_error(y, predictions)
+    rmse = np.sqrt(mean_squared_error(y, predictions))
+    r2 = r2_score(y, predictions)
+
+    print(f"  MAE: {mae:.4f}")
+    print(f"  RMSE: {rmse:.4f}")
+    print(f"  R2: {r2:.4f}")
+
+
+def main():
+    print("=" * 60)
+    print("  SMART HEALTH MONITORING IoT — MODEL EVALUATION")
+    print("=" * 60)
+
+    # Load metrics file if available
+    metrics_path = os.path.join(MODELS_DIR, "model_metrics.json")
+    if os.path.exists(metrics_path):
+        with open(metrics_path) as f:
+            metrics = json.load(f)
+        print(f"\n  Saved metrics from training:")
+        print(json.dumps(metrics, indent=2))
+
+    evaluate_status_classifier()
+    evaluate_risk_regressor()
+    evaluate_anomaly_detector()
+    evaluate_heart_rate_forecaster()
+
+    print("\n" + "=" * 60)
+    print("  EVALUATION COMPLETE")
+    print("=" * 60)
 
 
 if __name__ == "__main__":

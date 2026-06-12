@@ -1,0 +1,63 @@
+{
+  "status_classifier": {
+    "accuracy": 0.9846666666666667,
+    "precision_macro": 0.9862421564227359,
+    "recall_macro": 0.979702516733165,
+    "f1_macro": 0.982911472869752,
+    "classification_report": {
+      "NORMAL": {
+        "precision": 0.9810040705563093,
+        "recall": 0.995639201285288,
+        "f1-score": 0.9882674564301174,
+        "support": 4357.0
+      },
+      "WARNING": {
+        "precision": 0.9773156899810964,
+        "recall": 0.955637707948244,
+        "f1-score": 0.9663551401869159,
+        "support": 1082.0
+      },
+      "CRITICAL": {
+        "precision": 0.986648865153538,
+        "recall": 0.9706654991243433,
+        "f1-score": 0.9785919223129552,
+        "support": 2284.0
+      },
+      "EMERGENCY": {
+        "precision": 1.0,
+        "recall": 0.9968676585747847,
+        "f1-score": 0.9984313725490196,
+        "support": 1277.0
+      },
+      "accuracy": 0.9846666666666667,
+      "macro avg": {
+        "precision": 0.9862421564227359,
+        "recall": 0.979702516733165,
+        "f1-score": 0.982911472869752,
+        "support": 9000.0
+      },
+      "weighted avg": {
+        "precision": 0.9846884799982296,
+        "recall": 0.9846666666666667,
+        "f1-score": 0.9846198202951281,
+        "support": 9000.0
+      }
+    }
+  },
+  "risk_regressor": {
+    "mae": 1.4321728039389159,
+    "rmse": 4.222327011147087,
+    "r2": 0.9749063036174336
+  },
+  "anomaly_detector": {
+    "precision": 0.6595744680851063,
+    "recall": 0.1132863482119551,
+    "f1": 0.19336155045667186,
+    "predicted_anomaly_rate": 0.07311111111111111
+  },
+  "heart_rate_forecaster": {
+    "mae": 0.4281307600562373,
+    "rmse": 0.8945377143568648,
+    "r2": 0.9974834338979475
+  }
+}

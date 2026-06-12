@@ -2,27 +2,17 @@ services:
   zookeeper:
     image: confluentinc/cp-zookeeper:7.6.1
     container_name: smart-health-zookeeper
-    mem_limit: 512m
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
-      KAFKA_HEAP_OPTS: "-Xmx256M -Xms128M"
     ports:
       - "2181:2181"
-    healthcheck:
-      test: ["CMD-SHELL", "nc -z localhost 2181"]
-      start_period: 10s
-      interval: 5s
-      timeout: 5s
-      retries: 20
 
   kafka:
     image: confluentinc/cp-kafka:7.6.1
     container_name: smart-health-kafka
-    mem_limit: 1g
     depends_on:
-      zookeeper:
-        condition: service_healthy
+      - zookeeper
     ports:
       - "9092:9092"
     environment:
@@ -34,17 +24,33 @@ services:
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
-      KAFKA_HEAP_OPTS: "-Xmx512M -Xms256M"
     healthcheck:
       test: ["CMD-SHELL", "kafka-topics --bootstrap-server localhost:9092 --list >/dev/null 2>&1"]
       interval: 10s
       timeout: 10s
       retries: 12
 
+  kafka-setup:
+    image: confluentinc/cp-kafka:7.6.1
+    container_name: smart-health-kafka-setup
+    depends_on:
+      kafka:
+        condition: service_healthy
+    command: >
+      bash -c "
+        echo 'Creating Kafka topics...' &&
+        kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic health.vitals --partitions 3 --replication-factor 1 &&
+        kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic health.blood_pressure --partitions 3 --replication-factor 1 &&
+        kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic health.glucose --partitions 3 --replication-factor 1 &&
+        kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic health.activity --partitions 3 --replication-factor 1 &&
+        kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic health.fall_safety --partitions 3 --replication-factor 1 &&
+        echo 'All topics created successfully.'
+      "
+    restart: "no"
+
   cassandra:
     image: cassandra:4.1
     container_name: smart-health-cassandra
-    mem_limit: 1g
     ports:
       - "9042:9042"
     environment:
@@ -64,7 +70,6 @@ services:
   cassandra-init:
     image: cassandra:4.1
     container_name: smart-health-cassandra-init
-    mem_limit: 512m
     depends_on:
       cassandra:
         condition: service_healthy
@@ -76,14 +81,12 @@ services:
   spark-master:
     image: bitnamilegacy/spark:3.5.1
     container_name: smart-health-spark-master
-    mem_limit: 512m
     environment:
       SPARK_MODE: master
       SPARK_RPC_AUTHENTICATION_ENABLED: "no"
       SPARK_RPC_ENCRYPTION_ENABLED: "no"
       SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED: "no"
       SPARK_SSL_ENABLED: "no"
-      SPARK_DAEMON_MEMORY: 384m
     ports:
       - "7077:7077"
       - "8080:8080"
@@ -91,15 +94,13 @@ services:
   spark-worker:
     image: bitnamilegacy/spark:3.5.1
     container_name: smart-health-spark-worker
-    mem_limit: 1g
     depends_on:
       - spark-master
     environment:
       SPARK_MODE: worker
       SPARK_MASTER_URL: spark://spark-master:7077
-      SPARK_WORKER_MEMORY: 768m
+      SPARK_WORKER_MEMORY: 1G
       SPARK_WORKER_CORES: 1
-      SPARK_DAEMON_MEMORY: 384m
       SPARK_RPC_AUTHENTICATION_ENABLED: "no"
       SPARK_RPC_ENCRYPTION_ENABLED: "no"
       SPARK_LOCAL_STORAGE_ENCRYPTION_ENABLED: "no"
@@ -107,9 +108,7 @@ services:
 
   spark-streaming:
     build: ./spark
-    image: smart-health-spark-ml:latest
     container_name: smart-health-spark-streaming
-    mem_limit: 2g
     depends_on:
       kafka:
         condition: service_healthy
@@ -121,17 +120,22 @@ services:
         condition: service_started
     volumes:
       - ./spark:/app:ro
-      - ./ml:/ml:ro
       - ./models:/models:ro
+      - ./alerts:/app/alerts:ro
     environment:
       HOME: /tmp
-      PYTHONPATH: /ml:/app
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
-      KAFKA_TOPIC: smart-health-data
       CASSANDRA_HOST: cassandra
       CASSANDRA_KEYSPACE: smart_health
-      MODEL_DIR: /models
-      CHECKPOINT_LOCATION: /tmp/smart-health-checkpoint
+      ALERT_SMTP_HOST: ${ALERT_SMTP_HOST:-smtp.gmail.com}
+      ALERT_SMTP_PORT: ${ALERT_SMTP_PORT:-587}
+      ALERT_SMTP_USER: ${ALERT_SMTP_USER:-}
+      ALERT_SMTP_PASSWORD: ${ALERT_SMTP_PASSWORD:-}
+      ALERT_DOCTOR_EMAIL: ${ALERT_DOCTOR_EMAIL:-}
+      ALERT_DOCTOR_NAME: ${ALERT_DOCTOR_NAME:-Doctor}
+      ALERT_MIN_SEVERITY: ${ALERT_MIN_SEVERITY:-HIGH}
+      ALERT_COOLDOWN_MINUTES: ${ALERT_COOLDOWN_MINUTES:-5}
+      DASHBOARD_BASE_URL: ${DASHBOARD_BASE_URL:-http://localhost:5000}
     command:
       - /bin/bash
       - -c
@@ -142,11 +146,8 @@ services:
         --executor-memory 512m
         --conf spark.executor.cores=1
         --conf spark.cores.max=1
-        --conf spark.driver.memoryOverhead=256m
-        --conf spark.executor.memoryOverhead=256m
-        --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1,com.datastax.spark:spark-cassandra-connector_2.12:3.5.1
+        --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1
         --conf spark.jars.ivy=/tmp/.ivy2
-        --conf spark.cassandra.connection.host=$$CASSANDRA_HOST
         --conf spark.sql.streaming.checkpointLocation=/tmp/smart-health-checkpoint
         /app/streaming_job.py
     restart: on-failure
@@ -154,20 +155,16 @@ services:
   producer:
     build: ./producer
     container_name: smart-health-producer
-    mem_limit: 256m
     depends_on:
       kafka:
         condition: service_healthy
     environment:
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
-      KAFKA_TOPIC: smart-health-data
-      SIMULATION_INTERVAL_SECONDS: 3
     restart: unless-stopped
 
   dashboard:
     build: ./dashboard
     container_name: smart-health-dashboard
-    mem_limit: 512m
     depends_on:
       cassandra-init:
         condition: service_completed_successfully
@@ -175,9 +172,24 @@ services:
       CASSANDRA_HOST: cassandra
       CASSANDRA_KEYSPACE: smart_health
       PATIENT_IDS: patient-1,patient-2,patient-3,patient-4,patient-5
+      ALERT_CONFIG_PATH: /app/alerts/alert_config.yml
+      ALERT_SMTP_USER: ${ALERT_SMTP_USER:-}
+    volumes:
+      - ./alerts:/app/alerts
     ports:
       - "5000:5000"
     restart: unless-stopped
+
+  # Optional: MailHog for local email testing
+  # Start with: docker compose --profile dev up -d
+  mailhog:
+    image: mailhog/mailhog
+    container_name: smart-health-mailhog
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+    profiles:
+      - dev
 
 volumes:
   cassandra-data:

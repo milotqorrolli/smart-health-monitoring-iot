@@ -1,0 +1,24 @@
+{
+  "model_version": "smart-health-ai-v1",
+  "trained_at": "2026-06-11T21:00:43.793514+00:00",
+  "artifacts": {
+    "status_classifier": "status_classifier.pkl",
+    "risk_regressor": "risk_regressor.pkl",
+    "anomaly_detector": "anomaly_detector.pkl",
+    "heart_rate_forecaster": "heart_rate_forecaster.pkl",
+    "preprocessing_pipeline": "preprocessing_pipeline.pkl"
+  },
+  "training_rows": 41000,
+  "source_datasets": [
+    "Health data.csv",
+    "Oxygen Dataset Final.csv",
+    "Synthetic_patient-HealthCare-Monitoring_dataset.csv",
+    "diabetes_dataset.csv",
+    "healthcare_iot_target_dataset_5000.csv",
+    "human_vital_signs_dataset_2024.csv",
+    "patients_data_with_alerts.xlsx",
+    "personal_health_data.csv + activity_environment_data.csv + digital_interaction_data.csv",
+    "updated_version.csv"
+  ],
+  "medical_disclaimer": "Educational IoT simulation only. Not for diagnosis or clinical use."
+}

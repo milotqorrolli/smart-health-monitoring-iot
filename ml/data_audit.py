@@ -1,153 +1,162 @@
-from __future__ import annotations
+"""
+Dataset Audit Script for Smart Health Monitoring IoT System.
+Inspects all datasets and reports shape, columns, missing values, and selection decisions.
+"""
 
-import json
-from pathlib import Path
-from typing import Any
+import os
+import sys
 
 import pandas as pd
 
+DATASETS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "datasets")
 
-ROOT_DIR = Path(__file__).resolve().parents[1]
-DATASET_DIR = ROOT_DIR / "datasets"
-MODEL_DIR = ROOT_DIR / "models"
-
-DATASET_STRATEGY: dict[str, dict[str, Any]] = {
+DATASET_INFO = {
     "Synthetic_patient-HealthCare-Monitoring_dataset.csv": {
-        "used": True,
-        "use_case": "Primary vital signs, fall detection, alert labels, simulated disease labels.",
-        "reason": "Directly matches the real-time patient monitoring domain and contains alert columns.",
-    },
-    "patients_data_with_alerts.xlsx": {
-        "used": True,
-        "use_case": "Additional alert labels for status classification validation.",
-        "reason": "Uses the same schema as the synthetic patient monitoring dataset.",
+        "status": "USED",
+        "use_case": "Primary — vital signs, fall detection, alert labels, status classification",
+        "reason": "Contains HR, SpO2, BP, temperature, fall detection, per-vital alert labels, predicted disease."
     },
     "human_vital_signs_dataset_2024.csv": {
-        "used": True,
-        "use_case": "Vital signs, demographics, derived BMI/MAP, and risk category labels.",
-        "reason": "Strong fit for adult vital-sign risk classification and regression.",
+        "status": "USED",
+        "use_case": "Primary — risk classification with demographics and derived features",
+        "reason": "Contains vitals + demographics + derived features + labeled Risk Category."
     },
     "personal_health_data.csv": {
-        "used": True,
-        "use_case": "Wearable profile, Health_Score risk target, sleep, stress, ECG, SpO2, skin temperature.",
-        "reason": "Provides wearable context and supervised anomaly support.",
+        "status": "USED",
+        "use_case": "Primary — anomaly detection and risk regression",
+        "reason": "Contains Health_Score for risk, Anomaly_Flag for supervised anomaly detection."
     },
-    "activity_environment_data.csv": {
-        "used": True,
-        "use_case": "Activity, exercise, environment, and battery data joined to personal_health_data.",
-        "reason": "Adds wearable activity and device context using User_ID and Timestamp.",
-    },
-    "digital_interaction_data.csv": {
-        "used": True,
-        "use_case": "Notifications and screen time joined to personal_health_data.",
-        "reason": "Adds digital interaction context using User_ID and Timestamp.",
+    "patients_data_with_alerts.xlsx": {
+        "status": "USED",
+        "use_case": "Secondary — additional alert labels for status classifier",
+        "reason": "Provides mixed-case alert labels for training status classification."
     },
     "healthcare_iot_target_dataset_5000.csv": {
-        "used": True,
-        "use_case": "IoT sensor targets, target health status, battery level, and sensor type.",
-        "reason": "Useful for health status and risk target enrichment.",
+        "status": "USED",
+        "use_case": "Secondary — IoT health status targets and battery level",
+        "reason": "IoT-specific targets with device battery level feature."
     },
     "heart_rate.csv": {
-        "used": True,
-        "use_case": "Heart rate forecasting using lag features.",
-        "reason": "Contains multiple heart-rate time series suitable for next-step forecasting.",
-    },
-    "Health data.csv": {
-        "used": True,
-        "use_case": "Auxiliary pulse, body temperature, SpO2, and status labels.",
-        "reason": "Small lightweight dataset that maps cleanly to core vitals.",
+        "status": "USED",
+        "use_case": "Primary — heart rate time series forecasting",
+        "reason": "Four independent HR time series (T1-T4) for lag-based forecasting model."
     },
     "Oxygen Dataset Final.csv": {
-        "used": True,
-        "use_case": "Optional oxygen-related SpO2 and pulse enrichment.",
-        "reason": "Adds SpO2/pulse samples for anomaly and status patterns.",
+        "status": "USED",
+        "use_case": "Secondary — supplements anomaly detection with SpO2 data",
+        "reason": "SpO2, pulse rate, oxygen flow for oxygen-specific anomaly features."
     },
-    "diabetes_dataset.csv": {
-        "used": True,
-        "use_case": "Optional risk enrichment through glucose, BMI, BP, smoking, and diabetes risk score.",
-        "reason": "Useful for risk regression but not used as the main streaming target.",
+    "Health data.csv": {
+        "status": "USED",
+        "use_case": "Supplementary — lightweight dataset for additional training samples",
+        "reason": "Contains pulse, body temperature, SpO2, and status labels."
     },
-    "updated_version.csv": {
-        "used": True,
-        "use_case": "Optional cardiovascular risk enrichment.",
-        "reason": "Provides BP, smoking, diabetes, and heart attack risk context.",
+    "digital_interaction_data.csv": {
+        "status": "EXCLUDED",
+        "use_case": "None",
+        "reason": "Contains only Notifications_Received and Screen_Time — digital behavior, not health sensors."
     },
-    "Synthetic-Infant-Health-Data.csv": {
-        "used": False,
-        "use_case": "Ignored for the main version.",
-        "reason": "Pediatric/infant disease data does not align with the adult wearable simulator.",
+    "activity_environment_data.csv": {
+        "status": "EXCLUDED",
+        "use_case": "None",
+        "reason": "Mixes activity data with non-health environmental data (UV, Altitude, Ambient_Temperature)."
     },
     "healthcare_patient_journey.csv": {
-        "used": False,
-        "use_case": "Future work only.",
-        "reason": "Administrative hospital journey data is not real-time IoT sensor telemetry.",
+        "status": "EXCLUDED",
+        "use_case": "None",
+        "reason": "Hospital administrative data (wait_time, cost, satisfaction) — not real-time IoT."
+    },
+    "Synthetic-Infant-Health-Data.csv": {
+        "status": "EXCLUDED",
+        "use_case": "None",
+        "reason": "Pediatric cardiac disease data — does not align with adult health monitoring."
+    },
+    "diabetes_dataset.csv": {
+        "status": "EXCLUDED",
+        "use_case": "None",
+        "reason": "Static disease classification dataset — not a real-time IoT sensor stream."
+    },
+    "updated_version.csv": {
+        "status": "EXCLUDED",
+        "use_case": "None",
+        "reason": "Cardiovascular risk/cholesterol data — not generated by real-time wearable sensors."
     },
 }
 
 
-def read_dataset(path: Path) -> pd.DataFrame:
-    if path.suffix.lower() == ".csv":
-        return pd.read_csv(path)
-    if path.suffix.lower() in {".xlsx", ".xls"}:
-        return pd.read_excel(path)
-    raise ValueError(f"Unsupported dataset type: {path.name}")
+def audit_dataset(filepath, name):
+    """Audit a single dataset file."""
+    info = DATASET_INFO.get(name, {"status": "UNKNOWN", "use_case": "Unknown", "reason": "Not categorized"})
 
+    print(f"\n{'=' * 70}")
+    print(f"  DATASET: {name}")
+    print(f"{'=' * 70}")
 
-def audit_dataset(path: Path) -> dict[str, Any]:
-    strategy = DATASET_STRATEGY.get(
-        path.name,
-        {
-            "used": False,
-            "use_case": "Not selected.",
-            "reason": "Dataset is not part of the documented project strategy.",
-        },
-    )
     try:
-        df = read_dataset(path)
-        missing = {column: int(count) for column, count in df.isna().sum().items() if int(count) > 0}
-        return {
-            "dataset": path.name,
-            "shape": [int(df.shape[0]), int(df.shape[1])],
-            "columns": [str(column) for column in df.columns],
-            "missing_values": missing,
-            "selected_use_case": strategy["use_case"],
-            "used": bool(strategy["used"]),
-            "reason": strategy["reason"],
-        }
-    except Exception as exc:
-        return {
-            "dataset": path.name,
-            "shape": None,
-            "columns": [],
-            "missing_values": {},
-            "selected_use_case": strategy["use_case"],
-            "used": bool(strategy["used"]),
-            "reason": f"{strategy['reason']} Read failed: {exc}",
-        }
+        if filepath.endswith(".xlsx"):
+            df = pd.read_excel(filepath)
+        else:
+            df = pd.read_csv(filepath)
+
+        print(f"  Shape:       {df.shape[0]} rows × {df.shape[1]} columns")
+        print(f"  Columns:     {list(df.columns)}")
+        print(f"  Status:      {info['status']}")
+        print(f"  Use case:    {info['use_case']}")
+        print(f"  Reason:      {info['reason']}")
+
+        missing = df.isnull().sum()
+        missing_cols = missing[missing > 0]
+        if len(missing_cols) > 0:
+            print(f"  Missing values:")
+            for col_name, count in missing_cols.items():
+                print(f"    {col_name}: {count} ({count/len(df)*100:.1f}%)")
+        else:
+            print(f"  Missing values: None")
+
+        print(f"  Dtypes:      {dict(df.dtypes.value_counts())}")
+
+    except FileNotFoundError:
+        print(f"  ERROR: File not found at {filepath}")
+    except Exception as e:
+        print(f"  ERROR: Could not read file — {e}")
 
 
-def main() -> None:
-    MODEL_DIR.mkdir(exist_ok=True)
-    audits = []
-    for path in sorted(DATASET_DIR.iterdir()):
-        if path.suffix.lower() not in {".csv", ".xlsx", ".xls"}:
-            continue
-        audits.append(audit_dataset(path))
+def main():
+    print("=" * 70)
+    print("  SMART HEALTH MONITORING IoT — DATASET AUDIT REPORT")
+    print("=" * 70)
+    print(f"  Datasets directory: {DATASETS_DIR}")
 
-    for item in audits:
-        print("=" * 80)
-        print(f"Dataset: {item['dataset']}")
-        print(f"Shape: {item['shape']}")
-        print(f"Columns: {', '.join(item['columns'])}")
-        print(f"Missing values: {json.dumps(item['missing_values'], ensure_ascii=True)}")
-        print(f"Selected use case: {item['selected_use_case']}")
-        print(f"Used: {item['used']}")
-        print(f"Reason: {item['reason']}")
+    if not os.path.isdir(DATASETS_DIR):
+        print(f"  ERROR: Datasets directory not found: {DATASETS_DIR}")
+        sys.exit(1)
 
-    output_path = MODEL_DIR / "dataset_audit.json"
-    output_path.write_text(json.dumps(audits, indent=2, ensure_ascii=True), encoding="utf-8")
-    print("=" * 80)
-    print(f"Saved dataset audit to {output_path}")
+    # List all files in datasets/
+    all_files = sorted(os.listdir(DATASETS_DIR))
+    dataset_files = [f for f in all_files if f.endswith((".csv", ".xlsx"))]
+
+    print(f"  Total dataset files found: {len(dataset_files)}")
+
+    used_count = 0
+    excluded_count = 0
+
+    for filename in dataset_files:
+        filepath = os.path.join(DATASETS_DIR, filename)
+        audit_dataset(filepath, filename)
+        info = DATASET_INFO.get(filename, {})
+        if info.get("status") == "USED":
+            used_count += 1
+        elif info.get("status") == "EXCLUDED":
+            excluded_count += 1
+
+    print(f"\n{'=' * 70}")
+    print(f"  SUMMARY")
+    print(f"{'=' * 70}")
+    print(f"  Total datasets: {len(dataset_files)}")
+    print(f"  USED:           {used_count}")
+    print(f"  EXCLUDED:       {excluded_count}")
+    print(f"  UNCATEGORIZED:  {len(dataset_files) - used_count - excluded_count}")
+    print(f"{'=' * 70}")
 
 
 if __name__ == "__main__":

@@ -1,195 +1,238 @@
+"""
+Smart Health Monitoring IoT — Flask Dashboard
+Displays live patient status, risk scores, anomalies, alerts, and email settings.
+"""
+
+import logging
 import os
 import time
-from datetime import datetime, timezone
-from typing import Any
+from datetime import timezone
 
+import yaml
 from cassandra.cluster import Cluster
 from cassandra.query import dict_factory
-from flask import Flask, jsonify, render_template
-
+from flask import Flask, flash, jsonify, redirect, render_template, request, url_for
 
 CASSANDRA_HOST = os.getenv("CASSANDRA_HOST", "localhost")
 KEYSPACE = os.getenv("CASSANDRA_KEYSPACE", "smart_health")
-PATIENT_IDS = [
-    patient.strip()
-    for patient in os.getenv("PATIENT_IDS", "patient-1,patient-2,patient-3,patient-4,patient-5").split(",")
-    if patient.strip()
-]
+PATIENT_IDS = [p.strip() for p in os.getenv("PATIENT_IDS", "patient-1,patient-2,patient-3,patient-4,patient-5").split(",")]
+ALERT_CONFIG_PATH = os.getenv("ALERT_CONFIG_PATH", "/app/alerts/alert_config.yml")
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logger = logging.getLogger("Dashboard")
 
 app = Flask(__name__)
-cluster = None
+app.secret_key = os.getenv("FLASK_SECRET_KEY", "smart-health-secret-key-2024")
+
 session = None
-statements: dict[str, Any] = {}
-last_connection_error = ""
 
 
-def serialize_value(value):
-    if value is None:
-        return None
-    if isinstance(value, datetime):
-        return value.replace(tzinfo=timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M:%S")
-    return value
-
-
-def serialize_row(row: dict) -> dict:
-    return {key: serialize_value(value) for key, value in row.items()}
-
-
-def waiting_latest() -> list[dict]:
-    return [
-        {
-            "patient_id": patient_id,
-            "predicted_status": "WAITING",
-            "risk_score": None,
-            "risk_level": "WAITING",
-            "is_anomaly": None,
-            "anomaly_score": None,
-            "predicted_next_heart_rate": None,
-            "alert_type": "NO_ALERT",
-            "alert_severity": "NONE",
-            "alert_message": "Waiting for Cassandra and streaming data.",
-        }
-        for patient_id in PATIENT_IDS
-    ]
-
-
-def connect_to_cassandra() -> bool:
-    global cluster, session, statements, last_connection_error
-
-    if session is not None:
-        return True
-
-    try:
-        cluster = Cluster([CASSANDRA_HOST])
-        session = cluster.connect(KEYSPACE)
-        session.row_factory = dict_factory
-        statements = {
-            "latest": session.prepare(
-                """
-                SELECT patient_id, reading_time, predicted_status, risk_score, risk_level,
-                       is_anomaly, anomaly_score, predicted_next_heart_rate,
-                       alert_type, alert_severity, alert_message,
-                       heart_rate, spo2, temperature, systolic_bp, diastolic_bp,
-                       respiratory_rate, glucose_level, battery_level, processed_at
-                FROM patient_latest_status
-                WHERE patient_id = ?
-                """
-            ),
-            "alerts": session.prepare(
-                """
-                SELECT patient_id, alert_time, alert_type, alert_severity, alert_message,
-                       predicted_status, risk_score, risk_level, is_anomaly, anomaly_score,
-                       predicted_next_heart_rate, fall_detected,
-                       heart_rate, spo2, temperature, systolic_bp, diastolic_bp,
-                       respiratory_rate, processed_at
-                FROM patient_alerts
-                WHERE patient_id = ?
-                LIMIT 10
-                """
-            ),
-            "readings": session.prepare(
-                """
-                SELECT patient_id, reading_time, predicted_status, risk_score, risk_level,
-                       is_anomaly, anomaly_score, anomaly_type, predicted_next_heart_rate,
-                       alert_type, alert_severity, alert_message, heart_rate, spo2,
-                       temperature, systolic_bp, diastolic_bp, respiratory_rate,
-                       glucose_level, battery_level, processed_at
-                FROM sensor_readings
-                WHERE patient_id = ?
-                LIMIT 25
-                """
-            ),
-        }
-        last_connection_error = ""
-        return True
-    except Exception as exc:
-        session = None
-        last_connection_error = str(exc)
-        print(f"Cassandra unavailable: {exc}", flush=True)
-        time.sleep(0.2)
-        return False
-
-
-def safe_execute(statement_name: str, values: list[Any]) -> list[dict]:
+def connect_to_cassandra():
+    """Connect to Cassandra with retries."""
     global session
-    if not connect_to_cassandra():
-        return []
+    while True:
+        try:
+            cluster = Cluster([CASSANDRA_HOST])
+            session = cluster.connect(KEYSPACE)
+            session.row_factory = dict_factory
+            logger.info(f"Connected to Cassandra at {CASSANDRA_HOST}/{KEYSPACE}")
+            return
+        except Exception as exc:
+            logger.warning(f"Cassandra not ready: {exc}. Retrying in 5s...")
+            time.sleep(5)
+
+
+def safe_query(query, params=None):
+    """Execute Cassandra query safely. Returns empty list on failure."""
+    global session
     try:
-        return [serialize_row(row) for row in session.execute(statements[statement_name], values)]
-    except Exception as exc:
-        print(f"Cassandra query failed: {exc}", flush=True)
-        session = None
+        if session is None:
+            return []
+        if params:
+            return list(session.execute(query, params))
+        return list(session.execute(query))
+    except Exception as e:
+        logger.warning(f"Query failed: {e}")
         return []
 
 
-def get_latest_status() -> list[dict]:
-    readings = []
-    for patient_id in PATIENT_IDS:
-        rows = safe_execute("latest", [patient_id])
-        if rows:
-            readings.append(rows[0])
-        else:
-            readings.append(
-                {
-                    "patient_id": patient_id,
-                    "predicted_status": "WAITING",
-                    "risk_score": None,
-                    "risk_level": "WAITING",
-                    "is_anomaly": None,
-                    "anomaly_score": None,
-                    "predicted_next_heart_rate": None,
-                    "alert_type": "NO_ALERT",
-                    "alert_severity": "NONE",
-                    "alert_message": "Waiting for first reading.",
-                }
-            )
-    return readings
+def serialize_datetime(value):
+    """Format datetime for display."""
+    if value is None:
+        return ""
+    return value.replace(tzinfo=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
 
-def get_recent_alerts(limit: int = 20) -> list[dict]:
-    alerts: list[dict] = []
-    for patient_id in PATIENT_IDS:
-        alerts.extend(safe_execute("alerts", [patient_id]))
-    alerts.sort(key=lambda row: row.get("alert_time") or "", reverse=True)
-    return alerts[:limit]
-
-
-def get_recent_readings(patient_id: str | None = None, limit: int = 25) -> list[dict]:
-    patient_ids = [patient_id] if patient_id else PATIENT_IDS
-    readings: list[dict] = []
-    for current_patient_id in patient_ids:
-        readings.extend(safe_execute("readings", [current_patient_id]))
-    readings.sort(key=lambda row: row.get("reading_time") or "", reverse=True)
-    return readings[:limit]
-
+# =============================================================================
+# Dashboard Routes
+# =============================================================================
 
 @app.route("/")
 def index():
-    latest = get_latest_status()
-    if not latest and last_connection_error:
-        latest = waiting_latest()
-    return render_template(
-        "index.html",
-        latest=latest,
-        alerts=get_recent_alerts(),
-        readings=get_recent_readings(limit=30),
-        cassandra_error=last_connection_error,
+    """Main dashboard page."""
+    # Get latest status for all patients
+    patients = []
+    for pid in PATIENT_IDS:
+        rows = safe_query(
+            "SELECT * FROM patient_latest_status WHERE patient_id = %s", [pid]
+        )
+        if rows:
+            row = rows[0]
+            row["reading_time"] = serialize_datetime(row.get("reading_time"))
+            row["processed_at"] = serialize_datetime(row.get("processed_at"))
+            patients.append(row)
+        else:
+            patients.append({"patient_id": pid, "predicted_status": "WAITING"})
+
+    # Get recent alerts
+    alerts = safe_query(
+        "SELECT * FROM patient_alerts LIMIT 10"
     )
+    for a in alerts:
+        a["alert_time"] = serialize_datetime(a.get("alert_time"))
+
+    # Get recent readings
+    readings = safe_query(
+        "SELECT * FROM sensor_readings LIMIT 20"
+    )
+    for r in readings:
+        r["reading_time"] = serialize_datetime(r.get("reading_time"))
+        r["processed_at"] = serialize_datetime(r.get("processed_at"))
+
+    return render_template("index.html", patients=patients, alerts=alerts, readings=readings)
 
 
 @app.route("/api/latest")
 def api_latest():
-    return jsonify(get_latest_status())
+    """API: Get latest status for all patients."""
+    patients = []
+    for pid in PATIENT_IDS:
+        rows = safe_query(
+            "SELECT * FROM patient_latest_status WHERE patient_id = %s", [pid]
+        )
+        if rows:
+            row = rows[0]
+            row["reading_time"] = serialize_datetime(row.get("reading_time"))
+            row["processed_at"] = serialize_datetime(row.get("processed_at"))
+            patients.append(row)
+    return jsonify(patients)
 
 
 @app.route("/api/alerts")
 def api_alerts():
-    return jsonify(get_recent_alerts())
+    """API: Get recent alerts with optional severity filter."""
+    severity = request.args.get("severity")
+    rows = safe_query("SELECT * FROM patient_alerts LIMIT 20")
+    for r in rows:
+        r["alert_time"] = serialize_datetime(r.get("alert_time"))
+    if severity:
+        rows = [r for r in rows if r.get("alert_severity") == severity.upper()]
+    return jsonify(rows)
 
 
 @app.route("/api/readings/<patient_id>")
 def api_readings(patient_id):
-    return jsonify(get_recent_readings(patient_id=patient_id, limit=50))
+    """API: Get reading history for a specific patient."""
+    rows = safe_query(
+        "SELECT * FROM sensor_readings WHERE patient_id = %s LIMIT 50", [patient_id]
+    )
+    for r in rows:
+        r["reading_time"] = serialize_datetime(r.get("reading_time"))
+        r["processed_at"] = serialize_datetime(r.get("processed_at"))
+    return jsonify(rows)
+
+
+@app.route("/api/alerts/email-log")
+def api_email_log():
+    """API: Get email alert log entries."""
+    rows = safe_query("SELECT * FROM email_alert_log LIMIT 20")
+    for r in rows:
+        r["sent_at"] = serialize_datetime(r.get("sent_at"))
+    return jsonify(rows)
+
+
+@app.route("/api/alerts/test-email", methods=["POST"])
+def api_test_email():
+    """API: Send test email."""
+    try:
+        from alerts.email_notifier import AlertEmailNotifier
+        notifier = AlertEmailNotifier(config_path=ALERT_CONFIG_PATH)
+        success = notifier.test_connection()
+        if success:
+            return jsonify({"status": "sent"})
+        else:
+            return jsonify({"status": "failed", "error": "SMTP connection failed or email alerting disabled."})
+    except Exception as e:
+        return jsonify({"status": "failed", "error": str(e)})
+
+
+@app.route("/settings/alerts", methods=["GET", "POST"])
+def settings_alerts():
+    """Email alert settings page."""
+    if request.method == "POST":
+        # Save settings
+        try:
+            config = _load_alert_config()
+            config.setdefault("email", {})
+            config["email"]["smtp_host"] = request.form.get("smtp_host", "smtp.gmail.com")
+            config["email"]["smtp_port"] = int(request.form.get("smtp_port", 587))
+            config["email"]["smtp_user"] = request.form.get("smtp_user", "")
+            smtp_pass = request.form.get("smtp_password", "")
+            if smtp_pass:  # Only update password if provided
+                config["email"]["smtp_password"] = smtp_pass
+
+            config.setdefault("doctors", [{}])
+            if config["doctors"]:
+                config["doctors"][0]["name"] = request.form.get("doctor_name", "Doctor")
+                config["doctors"][0]["email"] = request.form.get("doctor_email", "")
+                min_sev = request.form.get("min_severity", "HIGH")
+                config["doctors"][0]["receives_severity"] = [s.strip() for s in min_sev.split(",")]
+
+            config.setdefault("rate_limiting", {})
+            config["rate_limiting"]["cooldown_minutes"] = int(request.form.get("cooldown_minutes", 5))
+
+            config.setdefault("thresholds", {})
+            config["thresholds"]["send_on_fall_detected"] = "send_on_fall" in request.form
+            config["thresholds"]["send_on_anomaly"] = "send_on_anomaly" in request.form
+            config["thresholds"]["minimum_risk_score"] = int(request.form.get("min_risk_score", 70))
+
+            _save_alert_config(config)
+            flash("Alert settings saved successfully!", "success")
+        except Exception as e:
+            flash(f"Error saving settings: {e}", "error")
+
+        return redirect(url_for("settings_alerts"))
+
+    # GET: load current config
+    config = _load_alert_config()
+    email_log = safe_query("SELECT * FROM email_alert_log LIMIT 5")
+    for r in email_log:
+        r["sent_at"] = serialize_datetime(r.get("sent_at"))
+
+    return render_template("alert_settings.html", config=config, email_log=email_log)
+
+
+def _load_alert_config():
+    """Load alert config from YAML file."""
+    if os.path.exists(ALERT_CONFIG_PATH):
+        try:
+            with open(ALERT_CONFIG_PATH) as f:
+                return yaml.safe_load(f) or {}
+        except Exception:
+            pass
+    return {
+        "email": {"smtp_host": "smtp.gmail.com", "smtp_port": 587, "smtp_user": "", "smtp_password": ""},
+        "doctors": [{"name": "Doctor", "email": "", "receives_severity": ["CRITICAL", "HIGH"]}],
+        "rate_limiting": {"cooldown_minutes": 5},
+        "thresholds": {"send_on_fall_detected": True, "send_on_anomaly": False, "minimum_risk_score": 70},
+    }
+
+
+def _save_alert_config(config):
+    """Save alert config to YAML file."""
+    os.makedirs(os.path.dirname(ALERT_CONFIG_PATH), exist_ok=True)
+    with open(ALERT_CONFIG_PATH, "w") as f:
+        yaml.dump(config, f, default_flow_style=False)
 
 
 if __name__ == "__main__":

@@ -1,147 +1,148 @@
 # AI Models
 
-Medical disclaimer: these models support an educational IoT simulation only. They are not clinically validated and must not be used for diagnosis, triage, or treatment.
+## Overview
 
-## Shared Feature Schema
+The system uses 4 machine learning models trained offline on healthcare datasets, loaded at runtime by Spark Structured Streaming for real-time inference.
 
-Models use the canonical feature order stored in `models/feature_schema.json`.
+All models use scikit-learn and are serialized with joblib.
 
-Numeric features:
+---
 
-- `age`
-- `weight`
-- `height`
-- `bmi`
-- `heart_rate`
-- `spo2`
-- `temperature`
-- `systolic_bp`
-- `diastolic_bp`
-- `respiratory_rate`
-- `glucose_level`
-- `skin_temperature`
-- `steps`
-- `sleep_duration`
-- `screen_time`
-- `notifications_received`
-- `battery_level`
+## 1. Status Classification Model
 
-Categorical features:
+**File:** `models/status_classifier.pkl`
 
-- `gender`
-- `activity_level`
-- `exercise_type`
-- `exercise_intensity`
-- `stress_level`
-- `sleep_quality`
-- `chronic_condition`
-- `smoker`
-- `medication`
-- `fall_detected`
+**Purpose:** Predict current patient health status.
 
-Preprocessing uses `SimpleImputer` for missing values and `OneHotEncoder(handle_unknown="ignore")` for categorical values.
+**Output classes:** NORMAL, WARNING, CRITICAL, EMERGENCY
 
-## Status Classification Model
+**Algorithm:** RandomForestClassifier vs GradientBoostingClassifier (best F1 selected)
 
-Artifact: `models/status_classifier.pkl`
+**Input Features:**
+- heart_rate, spo2, temperature, systolic_bp, diastolic_bp
+- respiratory_rate, glucose_level, fall_detected
 
-Purpose: predict current patient status:
+**Training Data:**
+1. Synthetic_patient-HealthCare-Monitoring_dataset.csv (primary)
+2. human_vital_signs_dataset_2024.csv
+3. patients_data_with_alerts.xlsx
+4. healthcare_iot_target_dataset_5000.csv
+5. Health data.csv
 
-- `NORMAL`
-- `WARNING`
-- `CRITICAL`
-- `EMERGENCY`
+**Target Engineering:** Uses `derive_status()` function with clinical thresholds to label training data.
 
-Algorithm: `RandomForestClassifier`
+**Metrics:** Accuracy, Precision (macro), Recall (macro), F1 (macro), Confusion Matrix
 
-Training datasets:
+---
 
-- `Synthetic_patient-HealthCare-Monitoring_dataset.csv`
-- `patients_data_with_alerts.xlsx`
-- `human_vital_signs_dataset_2024.csv`
-- `healthcare_iot_target_dataset_5000.csv`
-- `Health data.csv`
-- auxiliary mapped rows from oxygen, diabetes, personal health, and cardiovascular datasets where useful
+## 2. Risk Score Regression Model
 
-Labels are taken directly when available, or derived with deterministic vital-sign thresholds in `ml/model_utils.py`.
+**File:** `models/risk_regressor.pkl`
 
-Saved metrics include accuracy, macro precision, macro recall, macro F1, classification report, and confusion matrix in `models/model_metrics.json`.
+**Purpose:** Predict numeric health risk score.
 
-## Risk Score Regression Model
+**Output:** risk_score (0–100)
 
-Artifact: `models/risk_regressor.pkl`
+**Algorithm:** RandomForestRegressor vs GradientBoostingRegressor (best RMSE selected)
 
-Purpose: predict `risk_score` from 0 to 100.
+**Input Features:**
+- heart_rate, spo2, temperature, systolic_bp, diastolic_bp
+- respiratory_rate, glucose_level, skin_temperature, battery_level, fall_detected
 
-Algorithm: `RandomForestRegressor`
+**Training Data:**
+1. personal_health_data.csv → risk_score = 100 - Health_Score
+2. human_vital_signs_dataset_2024.csv → Risk Category mapped to numeric
+3. healthcare_iot_target_dataset_5000.csv → Health Status mapped to score
 
-Risk targets are derived from:
+**Risk Level Derivation:**
+- 0–30 → LOW
+- 31–55 → MEDIUM
+- 56–75 → HIGH
+- 76–100 → CRITICAL
 
-- `Health_Score`: `risk_score = 100 - Health_Score`
-- `Risk Category`: mapped from low/medium/high/critical categories
-- `Target_Health_Status`: mapped from healthy/unhealthy categories
-- threshold status fallback when no direct target exists
+**Metrics:** MAE, RMSE, R²
 
-Saved metrics include MAE, RMSE, and R2.
+---
 
-## Anomaly Detection Model
+## 3. Anomaly Detection Model
 
-Artifact: `models/anomaly_detector.pkl`
+**File:** `models/anomaly_detector.pkl`
 
-Purpose: identify unusual sensor patterns and produce:
+**Purpose:** Detect unusual sensor reading combinations.
 
-- `is_anomaly`
-- `anomaly_score`
+**Output:**
+- is_anomaly (boolean)
+- anomaly_score (float, negative = more anomalous)
+- anomaly_type (text)
 
-Algorithm: `IsolationForest`
+**Algorithm:** IsolationForest (contamination=0.1, random_state=42)
 
-Training uses the unified feature frame. `personal_health_data.csv` contributes `Anomaly_Flag` where available, and threshold-derived abnormal patterns provide fallback evaluation labels.
+**Input Features:**
+- heart_rate, spo2, temperature, systolic_bp, diastolic_bp
+- respiratory_rate, glucose_level, skin_temperature, battery_level
 
-Saved metrics include precision, recall, F1, labeled row count, and predicted anomaly rate when labels are available.
+**Training Data:**
+1. personal_health_data.csv (Anomaly_Flag as supervised reference)
+2. healthcare_iot_target_dataset_5000.csv
+3. Oxygen Dataset Final.csv (with median imputation)
 
-## Heart Rate Forecasting Model
+**Metrics:** Contamination ratio, anomalies detected, precision/recall (when labels available)
 
-Artifact: `models/heart_rate_forecaster.pkl`
+---
 
-Purpose: predict `predicted_next_heart_rate`.
+## 4. Heart Rate Forecasting Model
 
-Algorithm: `RandomForestRegressor`
+**File:** `models/heart_rate_forecaster.pkl`
 
-Training data:
+**Purpose:** Predict the next heart rate value.
 
-- `heart_rate.csv`
+**Output:** predicted_next_heart_rate
 
-Lag features:
+**Algorithm:** RandomForestRegressor or GradientBoostingRegressor (best RMSE)
 
-- `hr_lag_1`
-- `hr_lag_2`
-- `hr_lag_3`
-- `hr_lag_4`
-- `hr_lag_5`
+**Input Features:** hr_lag_1, hr_lag_2, hr_lag_3, hr_lag_4, hr_lag_5
 
-Target:
+**Training Data:** heart_rate.csv exclusively
+- Columns T1, T2, T3, T4 stacked into supervised dataset
+- 5 lag features created per time step
+- Target: next value in sequence
 
-- `next_heart_rate`
+**Metrics:** MAE, RMSE, R²
 
-Saved metrics include MAE, RMSE, and R2.
+---
 
-## Streaming Inference
+## Preprocessing Pipeline
 
-Spark loads models from `/models` inside the `spark-streaming` container. Inference runs in `foreachBatch` by converting small micro-batches to pandas DataFrames.
+**File:** `models/preprocessing_pipeline.pkl`
 
-Fallback behavior:
+A scikit-learn ColumnTransformer that handles:
+- Numeric features: SimpleImputer (median) + StandardScaler
+- Categorical features: SimpleImputer (constant "Unknown") + OneHotEncoder
+- Boolean features: SimpleImputer (0)
 
-- Missing status classifier: use rule-based status.
-- Missing risk regressor: map status to default risk scores.
-- Missing anomaly detector: use severe rule status as anomaly fallback.
-- Missing heart-rate forecaster: use current heart rate as next-heart-rate fallback.
-- Failed individual model: log a warning and keep processing.
+**Feature Schema:** `models/feature_schema.json` — ordered list of expected features.
+
+---
+
+## Model Fallback Strategy
+
+If any model file is missing at Spark startup:
+- A warning is logged
+- Rule-based logic is used instead
+- The system never crashes due to missing models
+
+Rule-based fallback:
+- Status: `derive_status()` using clinical thresholds
+- Risk score: derived from status (NORMAL=20, WARNING=50, CRITICAL=75, EMERGENCY=92)
+- Anomaly: not detected (is_anomaly=False)
+- HR forecast: None
+
+---
 
 ## Limitations
 
-- Most datasets are synthetic or educational.
-- Dataset distributions may not match real clinical populations.
-- Thresholds are simplified for demonstration.
-- Forecasting uses short lag windows only.
-- The anomaly model is tuned for demo behavior, not clinical sensitivity.
-- The dashboard presents simulated risk and alerts, not medical advice.
+- Models are trained on synthetic/educational datasets
+- Limited sample sizes for some datasets
+- Heart rate forecaster uses simplified lag approach
+- Not validated against clinical standards
+- **This is NOT a certified medical device**

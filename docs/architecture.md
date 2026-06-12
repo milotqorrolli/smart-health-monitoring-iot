@@ -1,74 +1,104 @@
 # Architecture
 
-Medical disclaimer: this is an educational IoT simulation. It is not clinically validated and must not be used for diagnosis or real patient monitoring.
+## Overview
 
-## Pipeline
+The Smart Health Monitoring IoT System follows an event-driven streaming architecture:
 
-```text
-Producer Simulator
-  -> Kafka topic smart-health-data
-  -> Spark Structured Streaming
-  -> AI models and rule fallback
-  -> Cassandra
-  -> Flask Dashboard
+```
+VitalsMonitorSensor    → health.vitals          ┐
+BloodPressureSensor    → health.blood_pressure  │
+GlucoseSensor          → health.glucose         ├→ Spark Join → ML → Cassandra → Dashboard
+ActivityTrackerSensor  → health.activity        │                  ↓
+FallSafetySensor       → health.fall_safety     ┘            Email → Doctor
 ```
 
 ## Components
 
-### Producer Simulator
+### 1. Producer (Sensor Simulator)
 
-`producer/producer.py` creates stable profiles for five simulated patients. Each profile has demographics, chronic condition context, medication/smoking flags, and baseline vitals. Every loop emits one JSON event per patient to Kafka topic `smart-health-data`.
+Five independent sensor classes run as daemon threads, each publishing to its own Kafka topic:
 
-The simulator uses weighted condition profiles:
+- **VitalsMonitorSensor** → `health.vitals` (every 5s)
+- **BloodPressureSensor** → `health.blood_pressure` (every 15s)
+- **GlucoseSensor** → `health.glucose` (every 30s)
+- **ActivityTrackerSensor** → `health.activity` (every 10s)
+- **FallSafetySensor** → `health.fall_safety` (every 5s)
 
-- `NORMAL`: about 78 percent
-- `WARNING`: about 14 percent
-- `CRITICAL`: about 6 percent
-- `EMERGENCY`: about 2 percent
+Each sensor simulates realistic data using weighted condition profiles (75-80% normal, 12-15% warning, 5-8% critical, 1-3% emergency).
 
-It also injects occasional fall events, low battery, SpO2 drops, heart-rate spikes, blood-pressure spikes, and sensor anomalies.
+### 2. Apache Kafka
 
-### Kafka
+Serves as the message broker between sensors and Spark. Each sensor type has its own topic, enabling independent scaling and processing.
 
-Kafka is the decoupling layer between producers and stream processing. Docker internal services use `kafka:29092`; host tools use `localhost:9092`.
+### 3. Apache Spark Structured Streaming
 
-### Spark Structured Streaming
+- Reads from all 5 topics simultaneously
+- Applies event-time watermark (30 seconds) on each stream
+- Performs stream-stream joins using `health.vitals` as the primary stream
+- Converts micro-batches to Pandas for ML inference via `foreachBatch`
+- Applies 4 ML models in sequence
+- Generates alerts based on predictions
+- Writes enriched results to Cassandra
+- Sends email alerts for critical events
 
-`spark/streaming_job.py` reads Kafka messages, parses the unified JSON schema, and processes each micro-batch with `foreachBatch`.
+### 4. ML Inference Pipeline
 
-For each record, Spark:
+Models are trained offline and loaded at Spark startup:
+- Status Classifier (RandomForest/GradientBoosting)
+- Risk Score Regressor
+- Anomaly Detector (IsolationForest)
+- Heart Rate Forecaster
 
-- normalizes missing values
-- computes `rule_status`
-- loads scikit-learn artifacts from `/models`
-- predicts `predicted_status`
-- predicts `risk_score`
-- detects anomalies
-- forecasts next heart rate from recent per-patient history
-- generates alert fields
-- writes Cassandra tables
+If models are missing, the system falls back to rule-based logic.
 
-If models are unavailable, Spark keeps running with deterministic rule fallback.
+### 5. Apache Cassandra
 
-### AI Models
+Stores 4 tables:
+- `sensor_readings` — all enriched readings
+- `patient_alerts` — critical alerts only
+- `patient_latest_status` — latest status per patient (for dashboard)
+- `email_alert_log` — email delivery history
 
-Models are trained by `ml/train_models.py` and saved under `models/`. They are not trained inside Spark streaming.
+### 6. Flask Dashboard
 
-### Cassandra
+Displays real-time patient data, auto-refreshing every 4 seconds:
+- Patient status cards with color-coded health indicators
+- Risk score bars and anomaly indicators
+- Recent alerts table
+- Readings history table
+- Email alert configuration page
 
-The init container applies `cassandra/init.cql` after Cassandra becomes healthy. It creates:
+### 7. Email Alert System
 
-- `smart_health.sensor_readings`: full enriched event history by patient and reading time.
-- `smart_health.patient_alerts`: alert history by patient and alert time.
-- `smart_health.patient_latest_status`: latest status per patient for fast dashboard reads.
+Sends HTML emails to configured doctors when critical events occur:
+- Rate-limited (configurable cooldown)
+- Color-coded HTML with vital signs table
+- Supports Gmail, Outlook, Yahoo, and local MailHog testing
 
-### Flask Dashboard
+## Data Flow
 
-`dashboard/app.py` reads Cassandra and serves:
+1. Sensor threads generate readings based on patient profiles
+2. Events published to Kafka with patient_id as key
+3. Spark reads all topics, applies watermark, joins by patient_id
+4. After join, batch converted to Pandas for inference
+5. ML models predict status, risk, anomalies, and next HR
+6. Alert rules applied based on predictions
+7. Enriched records written to Cassandra
+8. Email sent for HIGH/CRITICAL alerts
+9. Dashboard reads latest status from Cassandra
 
-- `/`
-- `/api/latest`
-- `/api/alerts`
-- `/api/readings/<patient_id>`
+## Stream-Stream Join
 
-The UI refreshes every 5 seconds and shows waiting states if Cassandra is temporarily unavailable.
+The join uses a 30-second watermark window:
+- Primary stream: `health.vitals` (most frequent)
+- Left-outer join: other streams by patient_id within ±30s
+- If a slower sensor hasn't published yet, defaults are used
+
+## foreachBatch Processing
+
+Each micro-batch (every 10 seconds):
+1. Convert Spark DataFrame to Pandas
+2. Apply ML inference per row
+3. Generate alerts
+4. Write to Cassandra (cassandra-driver)
+5. Send email alerts (smtplib)

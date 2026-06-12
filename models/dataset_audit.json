@@ -1,0 +1,392 @@
+[
+  {
+    "dataset": "activity_environment_data.csv",
+    "shape": [
+      10000,
+      12
+    ],
+    "columns": [
+      "User_ID",
+      "Timestamp",
+      "Steps",
+      "Calories_Burned",
+      "Distance_Covered",
+      "Exercise_Type",
+      "Exercise_Duration",
+      "Exercise_Intensity",
+      "Ambient_Temperature",
+      "Battery_Level",
+      "Altitude",
+      "UV_Exposure"
+    ],
+    "missing_values": {
+      "Exercise_Type": 2601,
+      "Exercise_Intensity": 2601
+    },
+    "selected_use_case": "Activity, exercise, environment, and battery data joined to personal_health_data.",
+    "used": true,
+    "reason": "Adds wearable activity and device context using User_ID and Timestamp."
+  },
+  {
+    "dataset": "diabetes_dataset.csv",
+    "shape": [
+      100000,
+      31
+    ],
+    "columns": [
+      "age",
+      "gender",
+      "ethnicity",
+      "education_level",
+      "income_level",
+      "employment_status",
+      "smoking_status",
+      "alcohol_consumption_per_week",
+      "physical_activity_minutes_per_week",
+      "diet_score",
+      "sleep_hours_per_day",
+      "screen_time_hours_per_day",
+      "family_history_diabetes",
+      "hypertension_history",
+      "cardiovascular_history",
+      "bmi",
+      "waist_to_hip_ratio",
+      "systolic_bp",
+      "diastolic_bp",
+      "heart_rate",
+      "cholesterol_total",
+      "hdl_cholesterol",
+      "ldl_cholesterol",
+      "triglycerides",
+      "glucose_fasting",
+      "glucose_postprandial",
+      "insulin_level",
+      "hba1c",
+      "diabetes_risk_score",
+      "diabetes_stage",
+      "diagnosed_diabetes"
+    ],
+    "missing_values": {},
+    "selected_use_case": "Optional risk enrichment through glucose, BMI, BP, smoking, and diabetes risk score.",
+    "used": true,
+    "reason": "Useful for risk regression but not used as the main streaming target."
+  },
+  {
+    "dataset": "digital_interaction_data.csv",
+    "shape": [
+      10000,
+      4
+    ],
+    "columns": [
+      "User_ID",
+      "Timestamp",
+      "Notifications_Received",
+      "Screen_Time"
+    ],
+    "missing_values": {},
+    "selected_use_case": "Notifications and screen time joined to personal_health_data.",
+    "used": true,
+    "reason": "Adds digital interaction context using User_ID and Timestamp."
+  },
+  {
+    "dataset": "Health data.csv",
+    "shape": [
+      5909,
+      4
+    ],
+    "columns": [
+      "pulse",
+      "body temperature",
+      "SpO2",
+      "Status"
+    ],
+    "missing_values": {},
+    "selected_use_case": "Auxiliary pulse, body temperature, SpO2, and status labels.",
+    "used": true,
+    "reason": "Small lightweight dataset that maps cleanly to core vitals."
+  },
+  {
+    "dataset": "healthcare_iot_target_dataset_5000.csv",
+    "shape": [
+      5000,
+      13
+    ],
+    "columns": [
+      "Patient_ID",
+      "Timestamp",
+      "Sensor_ID",
+      "Sensor_Type",
+      "Temperature (\u00b0C)",
+      "Systolic_BP (mmHg)",
+      "Diastolic_BP (mmHg)",
+      "Heart_Rate (bpm)",
+      "Device_Battery_Level (%)",
+      "Target_Blood_Pressure",
+      "Target_Heart_Rate",
+      "Target_Health_Status",
+      "Battery_Level (%)"
+    ],
+    "missing_values": {},
+    "selected_use_case": "IoT sensor targets, target health status, battery level, and sensor type.",
+    "used": true,
+    "reason": "Useful for health status and risk target enrichment."
+  },
+  {
+    "dataset": "healthcare_patient_journey.csv",
+    "shape": [
+      3000,
+      15
+    ],
+    "columns": [
+      "patient_id",
+      "age",
+      "gender",
+      "chronic_condition",
+      "admission_type",
+      "department",
+      "wait_time_min",
+      "length_of_stay_days",
+      "procedures_count",
+      "medication_count",
+      "complications",
+      "discharge_status",
+      "readmitted_30d",
+      "total_cost_\u20ac",
+      "satisfaction_score"
+    ],
+    "missing_values": {},
+    "selected_use_case": "Future work only.",
+    "used": false,
+    "reason": "Administrative hospital journey data is not real-time IoT sensor telemetry."
+  },
+  {
+    "dataset": "heart_rate.csv",
+    "shape": [
+      1800,
+      4
+    ],
+    "columns": [
+      "T1",
+      "T2",
+      "T3",
+      "T4"
+    ],
+    "missing_values": {
+      "T3": 850,
+      "T4": 909
+    },
+    "selected_use_case": "Heart rate forecasting using lag features.",
+    "used": true,
+    "reason": "Contains multiple heart-rate time series suitable for next-step forecasting."
+  },
+  {
+    "dataset": "human_vital_signs_dataset_2024.csv",
+    "shape": [
+      200020,
+      17
+    ],
+    "columns": [
+      "Patient ID",
+      "Heart Rate",
+      "Respiratory Rate",
+      "Timestamp",
+      "Body Temperature",
+      "Oxygen Saturation",
+      "Systolic Blood Pressure",
+      "Diastolic Blood Pressure",
+      "Age",
+      "Gender",
+      "Weight (kg)",
+      "Height (m)",
+      "Derived_HRV",
+      "Derived_Pulse_Pressure",
+      "Derived_BMI",
+      "Derived_MAP",
+      "Risk Category"
+    ],
+    "missing_values": {},
+    "selected_use_case": "Vital signs, demographics, derived BMI/MAP, and risk category labels.",
+    "used": true,
+    "reason": "Strong fit for adult vital-sign risk classification and regression."
+  },
+  {
+    "dataset": "Oxygen Dataset Final.csv",
+    "shape": [
+      200000,
+      6
+    ],
+    "columns": [
+      "age",
+      "gender",
+      "spo2",
+      "pr",
+      "c/nc",
+      "oxy_flow"
+    ],
+    "missing_values": {
+      "spo2": 26245,
+      "pr": 32384,
+      "c/nc": 26442,
+      "oxy_flow": 37747
+    },
+    "selected_use_case": "Optional oxygen-related SpO2 and pulse enrichment.",
+    "used": true,
+    "reason": "Adds SpO2/pulse samples for anomaly and status patterns."
+  },
+  {
+    "dataset": "patients_data_with_alerts.xlsx",
+    "shape": [
+      50000,
+      13
+    ],
+    "columns": [
+      "Patient Number",
+      "Heart Rate (bpm)",
+      "SpO2 Level (%)",
+      "Systolic Blood Pressure (mmHg)",
+      "Diastolic Blood Pressure (mmHg)",
+      "Body Temperature (\u00b0C)",
+      "Fall Detection",
+      "Predicted Disease",
+      "Data Accuracy (%)",
+      "Heart Rate Alert",
+      "SpO2 Level Alert",
+      "Blood Pressure Alert",
+      "Temperature Alert"
+    ],
+    "missing_values": {},
+    "selected_use_case": "Additional alert labels for status classification validation.",
+    "used": true,
+    "reason": "Uses the same schema as the synthetic patient monitoring dataset."
+  },
+  {
+    "dataset": "personal_health_data.csv",
+    "shape": [
+      10000,
+      28
+    ],
+    "columns": [
+      "User_ID",
+      "Age",
+      "Gender",
+      "Weight",
+      "Height",
+      "Medical_Conditions",
+      "Medication",
+      "Smoker",
+      "Alcohol_Consumption",
+      "Timestamp",
+      "Day_of_Week",
+      "Sleep_Duration",
+      "Deep_Sleep_Duration",
+      "REM_Sleep_Duration",
+      "Wakeups",
+      "Snoring",
+      "Heart_Rate",
+      "Blood_Oxygen_Level",
+      "ECG",
+      "Calories_Intake",
+      "Water_Intake",
+      "Stress_Level",
+      "Mood",
+      "Skin_Temperature",
+      "Body_Fat_Percentage",
+      "Muscle_Mass",
+      "Health_Score",
+      "Anomaly_Flag"
+    ],
+    "missing_values": {
+      "Medical_Conditions": 3304,
+      "Alcohol_Consumption": 3360
+    },
+    "selected_use_case": "Wearable profile, Health_Score risk target, sleep, stress, ECG, SpO2, skin temperature.",
+    "used": true,
+    "reason": "Provides wearable context and supervised anomaly support."
+  },
+  {
+    "dataset": "Synthetic-Infant-Health-Data.csv",
+    "shape": [
+      15000,
+      21
+    ],
+    "columns": [
+      "Unnamed: 0",
+      "BirthAsphyxia",
+      "HypDistrib",
+      "HypoxiaInO2",
+      "CO2",
+      "ChestXray",
+      "Grunting",
+      "LVHreport",
+      "LowerBodyO2",
+      "RUQO2",
+      "CO2Report",
+      "XrayReport",
+      "Disease",
+      "GruntingReport",
+      "Age",
+      "LVH",
+      "DuctFlow",
+      "CardiacMixing",
+      "LungParench",
+      "LungFlow",
+      "Sick"
+    ],
+    "missing_values": {
+      "DuctFlow": 5689,
+      "CardiacMixing": 727
+    },
+    "selected_use_case": "Ignored for the main version.",
+    "used": false,
+    "reason": "Pediatric/infant disease data does not align with the adult wearable simulator."
+  },
+  {
+    "dataset": "Synthetic_patient-HealthCare-Monitoring_dataset.csv",
+    "shape": [
+      60000,
+      13
+    ],
+    "columns": [
+      "Patient Number",
+      "Heart Rate (bpm)",
+      "SpO2 Level (%)",
+      "Systolic Blood Pressure (mmHg)",
+      "Diastolic Blood Pressure (mmHg)",
+      "Body Temperature (\u00b0C)",
+      "Fall Detection",
+      "Predicted Disease",
+      "Data Accuracy (%)",
+      "Heart Rate Alert",
+      "SpO2 Level Alert",
+      "Blood Pressure Alert",
+      "Temperature Alert"
+    ],
+    "missing_values": {},
+    "selected_use_case": "Primary vital signs, fall detection, alert labels, simulated disease labels.",
+    "used": true,
+    "reason": "Directly matches the real-time patient monitoring domain and contains alert columns."
+  },
+  {
+    "dataset": "updated_version.csv",
+    "shape": [
+      1000,
+      10
+    ],
+    "columns": [
+      "age",
+      "sex",
+      "total_cholesterol",
+      "ldl",
+      "hdl",
+      "systolic_bp",
+      "diastolic_bp",
+      "smoking",
+      "diabetes",
+      "heart_attack"
+    ],
+    "missing_values": {},
+    "selected_use_case": "Optional cardiovascular risk enrichment.",
+    "used": true,
+    "reason": "Provides BP, smoking, diabetes, and heart attack risk context."
+  }
+]

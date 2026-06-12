@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Email Alert Settings — Smart Health Monitor</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  </head>
+  <body>
+    <main class="page">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Configuration</p>
+          <h1>Email Alert Settings</h1>
+        </div>
+        <a class="nav-link" href="/">← Dashboard</a>
+      </header>
+
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+          {% for category, message in messages %}
+            <div class="flash-msg flash-{{ category }}">{{ message }}</div>
+          {% endfor %}
+        {% endif %}
+      {% endwith %}
+
+      <form method="POST" class="settings-form">
+        <section class="form-section">
+          <h2>Doctor Configuration</h2>
+          <div class="form-group">
+            <label for="doctor_name">Doctor Name</label>
+            <input type="text" id="doctor_name" name="doctor_name"
+                   value="{{ config.get('doctors', [{}])[0].get('name', '') }}">
+          </div>
+          <div class="form-group">
+            <label for="doctor_email">Doctor Email</label>
+            <input type="email" id="doctor_email" name="doctor_email"
+                   value="{{ config.get('doctors', [{}])[0].get('email', '') }}">
+          </div>
+        </section>
+
+        <section class="form-section">
+          <h2>SMTP Configuration</h2>
+          <div class="form-group">
+            <label for="smtp_host">SMTP Host</label>
+            <input type="text" id="smtp_host" name="smtp_host"
+                   value="{{ config.get('email', {}).get('smtp_host', 'smtp.gmail.com') }}">
+          </div>
+          <div class="form-group">
+            <label for="smtp_port">SMTP Port</label>
+            <input type="number" id="smtp_port" name="smtp_port"
+                   value="{{ config.get('email', {}).get('smtp_port', 587) }}">
+          </div>
+          <div class="form-group">
+            <label for="smtp_user">SMTP Username</label>
+            <input type="text" id="smtp_user" name="smtp_user"
+                   value="{{ config.get('email', {}).get('smtp_user', '') }}">
+          </div>
+          <div class="form-group">
+            <label for="smtp_password">SMTP Password</label>
+            <input type="password" id="smtp_password" name="smtp_password"
+                   placeholder="Leave blank to keep current">
+          </div>
+        </section>
+
+        <section class="form-section">
+          <h2>Alert Thresholds</h2>
+          <div class="form-group">
+            <label for="min_severity">Minimum Severity to Send</label>
+            <select id="min_severity" name="min_severity">
+              <option value="CRITICAL,HIGH" {% if 'HIGH' in config.get('doctors', [{}])[0].get('receives_severity', []) %}selected{% endif %}>HIGH and CRITICAL</option>
+              <option value="CRITICAL" {% if config.get('doctors', [{}])[0].get('receives_severity', []) == ['CRITICAL'] %}selected{% endif %}>CRITICAL only</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="cooldown_minutes">Cooldown Minutes</label>
+            <input type="number" id="cooldown_minutes" name="cooldown_minutes"
+                   value="{{ config.get('rate_limiting', {}).get('cooldown_minutes', 5) }}" min="1" max="60">
+          </div>
+          <div class="form-group">
+            <label for="min_risk_score">Minimum Risk Score (0-100)</label>
+            <input type="range" id="min_risk_score" name="min_risk_score"
+                   min="0" max="100"
+                   value="{{ config.get('thresholds', {}).get('minimum_risk_score', 70) }}"
+                   oninput="document.getElementById('risk-display').textContent = this.value">
+            <span id="risk-display">{{ config.get('thresholds', {}).get('minimum_risk_score', 70) }}</span>
+          </div>
+          <div class="form-group checkbox-group">
+            <label>
+              <input type="checkbox" name="send_on_fall"
+                     {% if config.get('thresholds', {}).get('send_on_fall_detected', True) %}checked{% endif %}>
+              Send on Fall Detected
+            </label>
+          </div>
+          <div class="form-group checkbox-group">
+            <label>
+              <input type="checkbox" name="send_on_anomaly"
+                     {% if config.get('thresholds', {}).get('send_on_anomaly', False) %}checked{% endif %}>
+              Send on Anomaly
+            </label>
+          </div>
+        </section>
+
+        <div class="form-actions">
+          <button type="submit" class="btn btn-primary">Save Settings</button>
+          <button type="button" class="btn btn-secondary" onclick="testEmail()">Send Test Email</button>
+        </div>
+      </form>
+
+      <div id="test-result" class="test-result" style="display:none;"></div>
+
+      <!-- Email Log -->
+      <section class="form-section">
+        <h2>Recent Email Log</h2>
+        {% if email_log %}
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Time</th>
+              <th>Patient</th>
+              <th>Alert Type</th>
+              <th>Severity</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for log in email_log %}
+            <tr>
+              <td>{{ log.sent_at }}</td>
+              <td>{{ log.patient_id }}</td>
+              <td>{{ log.alert_type }}</td>
+              <td>{{ log.alert_severity }}</td>
+              <td>{{ log.status }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <p class="no-data">No email log entries yet.</p>
+        {% endif %}
+      </section>
+
+      <footer class="disclaimer">
+        <p>⚠️ <strong>Medical Disclaimer:</strong> This is an educational IoT simulation project only.</p>
+      </footer>
+    </main>
+
+    <script>
+      function testEmail() {
+        const resultDiv = document.getElementById('test-result');
+        resultDiv.style.display = 'block';
+        resultDiv.textContent = 'Sending test email...';
+        resultDiv.className = 'test-result';
+
+        fetch('/api/alerts/test-email', { method: 'POST' })
+          .then(r => r.json())
+          .then(data => {
+            if (data.status === 'sent') {
+              resultDiv.textContent = 'Test email sent successfully!';
+              resultDiv.className = 'test-result test-success';
+            } else {
+              resultDiv.textContent = 'Failed: ' + (data.error || 'Unknown error');
+              resultDiv.className = 'test-result test-error';
+            }
+          })
+          .catch(err => {
+            resultDiv.textContent = 'Error: ' + err.message;
+            resultDiv.className = 'test-result test-error';
+          });
+      }
+    </script>
+  </body>
+</html>
