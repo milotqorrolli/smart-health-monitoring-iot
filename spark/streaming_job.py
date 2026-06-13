@@ -778,7 +778,8 @@ def main():
             spark.readStream.format("kafka")
             .option("kafka.bootstrap.servers", KAFKA_BOOTSTRAP_SERVERS)
             .option("subscribe", topic)
-            .option("startingOffsets", "earliest")
+            .option("startingOffsets", "latest")
+            .option("maxOffsetsPerTrigger", "50")
             .option("failOnDataLoss", "false")
             .load()
         )
@@ -829,7 +830,7 @@ def main():
             bp_df.alias("bp"),
             expr("""
                 v.patient_id = bp.patient_id AND
-                bp.bp_time BETWEEN v.vitals_time - interval 30 seconds AND v.vitals_time + interval 30 seconds
+                bp.bp_time BETWEEN v.vitals_time - interval 10 seconds AND v.vitals_time + interval 10 seconds
             """),
             "leftOuter",
         )
@@ -837,7 +838,7 @@ def main():
             glucose_df.alias("g"),
             expr("""
                 v.patient_id = g.patient_id AND
-                g.glucose_time BETWEEN v.vitals_time - interval 30 seconds AND v.vitals_time + interval 30 seconds
+                g.glucose_time BETWEEN v.vitals_time - interval 10 seconds AND v.vitals_time + interval 10 seconds
             """),
             "leftOuter",
         )
@@ -845,7 +846,7 @@ def main():
             activity_df.alias("a"),
             expr("""
                 v.patient_id = a.patient_id AND
-                a.activity_time BETWEEN v.vitals_time - interval 30 seconds AND v.vitals_time + interval 30 seconds
+                a.activity_time BETWEEN v.vitals_time - interval 10 seconds AND v.vitals_time + interval 10 seconds
             """),
             "leftOuter",
         )
@@ -853,7 +854,7 @@ def main():
             fall_df.alias("f"),
             expr("""
                 v.patient_id = f.patient_id AND
-                f.fall_time BETWEEN v.vitals_time - interval 30 seconds AND v.vitals_time + interval 30 seconds
+                f.fall_time BETWEEN v.vitals_time - interval 10 seconds AND v.vitals_time + interval 10 seconds
             """),
             "leftOuter",
         )

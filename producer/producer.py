@@ -235,7 +235,7 @@ class VitalsMonitorSensor(BaseSensor):
 
     def __init__(self, patient_profile, kafka_producer):
         super().__init__(patient_profile, kafka_producer, "health.vitals",
-                         "VITALS_MONITOR", "vitals-monitor", 5)
+                         "VITALS_MONITOR", "vitals-monitor", 15)
 
     def generate_reading(self, condition):
         bl_hr = self.patient["baseline_hr"]
@@ -286,7 +286,7 @@ class BloodPressureSensor(BaseSensor):
 
     def __init__(self, patient_profile, kafka_producer):
         super().__init__(patient_profile, kafka_producer, "health.blood_pressure",
-                         "BLOOD_PRESSURE_MONITOR", "bp-monitor", 15)
+                         "BLOOD_PRESSURE_MONITOR", "bp-monitor", 45)
 
     def generate_reading(self, condition):
         bl_sys = self.patient["baseline_systolic"]
@@ -320,7 +320,7 @@ class GlucoseSensor(BaseSensor):
 
     def __init__(self, patient_profile, kafka_producer):
         super().__init__(patient_profile, kafka_producer, "health.glucose",
-                         "GLUCOSE_SENSOR", "glucose-sensor", 30)
+                         "GLUCOSE_SENSOR", "glucose-sensor", 60)
 
     def generate_reading(self, condition):
         bl_glucose = self.patient["baseline_glucose"]
@@ -343,7 +343,7 @@ class ActivityTrackerSensor(BaseSensor):
 
     def __init__(self, patient_profile, kafka_producer):
         super().__init__(patient_profile, kafka_producer, "health.activity",
-                         "ACTIVITY_TRACKER", "activity-tracker", 10)
+                         "ACTIVITY_TRACKER", "activity-tracker", 30)
 
     def generate_reading(self, condition):
         choices = [
@@ -369,7 +369,7 @@ class FallSafetySensor(BaseSensor):
 
     def __init__(self, patient_profile, kafka_producer):
         super().__init__(patient_profile, kafka_producer, "health.fall_safety",
-                         "FALL_SAFETY_SENSOR", "fall-sensor", 5)
+                         "FALL_SAFETY_SENSOR", "fall-sensor", 15)
 
     def generate_reading(self, condition):
         skin_temp = 35.0 + random.uniform(-0.5, 1.5)

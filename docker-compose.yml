@@ -119,13 +119,16 @@ services:
       spark-worker:
         condition: service_started
     volumes:
-      - ./spark:/app:ro
+      - ./spark/streaming_job.py:/app/streaming_job.py:ro
       - ./models:/models:ro
+      - ./alerts:/app/alerts:ro
+      - ./alert-files:/tmp/smart-health-alerts
     environment:
       HOME: /tmp
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
       CASSANDRA_HOST: cassandra
       CASSANDRA_KEYSPACE: smart_health
+      ALERT_EMAILS_DIR: /tmp/smart-health-alerts
       ALERT_SMTP_HOST: ${ALERT_SMTP_HOST:-smtp.gmail.com}
       ALERT_SMTP_PORT: ${ALERT_SMTP_PORT:-587}
       ALERT_SMTP_USER: ${ALERT_SMTP_USER:-}
@@ -173,8 +176,10 @@ services:
       PATIENT_IDS: patient-1,patient-2,patient-3,patient-4,patient-5
       ALERT_CONFIG_PATH: /app/alerts/alert_config.yml
       ALERT_SMTP_USER: ${ALERT_SMTP_USER:-}
+      ALERT_EMAILS_DIR: /tmp/smart-health-alerts
     volumes:
-      - smart-health-alerts:/app/alerts
+      - ./alerts:/app/alerts
+      - ./alert-files:/tmp/smart-health-alerts
     ports:
       - "5000:5000"
     restart: unless-stopped
