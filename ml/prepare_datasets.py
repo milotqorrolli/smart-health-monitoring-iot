@@ -1,374 +1,531 @@
 """
-Dataset Preparation for Smart Health Monitoring IoT System
-
-Loads, cleans, and prepares datasets for model training.
-Maps all datasets to the unified schema.
+Dataset preparation pipeline for Smart Health Monitoring IoT System.
+Loads, cleans, normalizes, and merges selected datasets into unified training DataFrames.
 """
 
-import pandas as pd
+import os
+import sys
+import warnings
+
 import numpy as np
-from pathlib import Path
-from typing import Tuple, Optional
-import logging
+import pandas as pd
 
-from model_utils import (
-    derive_status,
-    ALL_INPUT_FEATURES,
-    VITAL_FEATURES,
-    get_default_values,
-)
+warnings.filterwarnings("ignore")
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+DATASETS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "datasets")
 
-DATASETS_PATH = Path(__file__).parent.parent / "datasets"
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from model_utils import derive_status, derive_risk_score_from_status
 
 
-class DatasetLoader:
-    """Load and prepare datasets for model training."""
+def load_synthetic_patient_monitoring():
+    """Load and map Synthetic_patient-HealthCare-Monitoring_dataset.csv"""
+    filepath = os.path.join(DATASETS_DIR, "Synthetic_patient-HealthCare-Monitoring_dataset.csv")
+    if not os.path.exists(filepath):
+        print(f"  WARNING: {filepath} not found")
+        return pd.DataFrame()
 
-    def __init__(self, datasets_path: Path = DATASETS_PATH):
-        self.datasets_path = datasets_path
-        self.default_values = get_default_values()
+    df = pd.read_csv(filepath)
+    print(f"  Loaded Synthetic_patient-HealthCare-Monitoring: {df.shape}")
 
-    def load_synthetic_patient_dataset(self) -> pd.DataFrame:
-        """Load Synthetic_patient-HealthCare-Monitoring_dataset.csv"""
-        path = self.datasets_path / "Synthetic_patient-HealthCare-Monitoring_dataset.csv"
-        df = pd.read_csv(path)
-        logger.info(f"Loaded Synthetic Patient Dataset: {df.shape}")
+    mapped = pd.DataFrame()
+    mapped["heart_rate"] = pd.to_numeric(df.get("Heart Rate (bpm)"), errors="coerce")
+    mapped["spo2"] = pd.to_numeric(df.get("SpO2 Level (%)"), errors="coerce")
+    mapped["systolic_bp"] = pd.to_numeric(df.get("Systolic Blood Pressure (mmHg)"), errors="coerce")
+    mapped["diastolic_bp"] = pd.to_numeric(df.get("Diastolic Blood Pressure (mmHg)"), errors="coerce")
+    mapped["temperature"] = pd.to_numeric(df.get("Body Temperature (°C)"), errors="coerce")
 
-        # Rename columns to match unified schema
-        df = df.rename(
-            columns={
-                "Patient Number": "patient_id",
-                "Heart Rate (bpm)": "heart_rate",
-                "SpO2 Level (%)": "spo2",
-                "Systolic Blood Pressure (mmHg)": "systolic_bp",
-                "Diastolic Blood Pressure (mmHg)": "diastolic_bp",
-                "Body Temperature (°C)": "temperature",
-                "Fall Detection": "fall_detected",
-                "Predicted Disease": "predicted_disease_simulated",
-                "Data Accuracy (%)": "data_accuracy",
-            }
-        )
+    # Map fall detection
+    fall_col = df.get("Fall Detection")
+    if fall_col is not None:
+        mapped["fall_detected"] = fall_col.map({"Yes": True, "No": False}).fillna(False).astype(int)
+    else:
+        mapped["fall_detected"] = 0
 
-        # Create unified schema columns
-        df = self._create_unified_columns(df)
+    # Normalize alert labels to uppercase
+    for col in ["Heart Rate Alert", "SpO2 Level Alert", "Blood Pressure Alert", "Temperature Alert"]:
+        if col in df.columns:
+            df[col] = df[col].str.upper()
 
-        # Derive status from vital signs if not present
-        if "status" not in df.columns:
-            df["status"] = df.apply(derive_status, axis=1)
+    # Derive status
+    mapped["respiratory_rate"] = np.nan
+    mapped["glucose_level"] = np.nan
+    mapped["status"] = mapped.apply(lambda r: derive_status(r.to_dict()), axis=1)
+    mapped["source"] = "synthetic_patient_monitoring"
 
-        logger.info(f"Processed Synthetic Patient Dataset: {df.shape}")
-        return df
+    return mapped
 
-    def load_human_vital_signs_dataset(self) -> pd.DataFrame:
-        """Load human_vital_signs_dataset_2024.csv"""
-        path = self.datasets_path / "human_vital_signs_dataset_2024.csv"
-        df = pd.read_csv(path)
-        logger.info(f"Loaded Human Vital Signs Dataset: {df.shape}")
 
-        # Rename columns
-        column_mapping = {
-            "Heart Rate": "heart_rate",
-            "Respiratory Rate": "respiratory_rate",
-            "Body Temperature": "temperature",
-            "Oxygen Saturation": "spo2",
-            "Systolic Blood Pressure": "systolic_bp",
-            "Diastolic Blood Pressure": "diastolic_bp",
-            "Age": "age",
-            "Gender": "gender",
-            "Weight": "weight",
-            "Height": "height",
-            "Derived_BMI": "bmi",
-            "Risk Category": "risk_category",
-        }
+def load_human_vital_signs():
+    """Load and map human_vital_signs_dataset_2024.csv"""
+    filepath = os.path.join(DATASETS_DIR, "human_vital_signs_dataset_2024.csv")
+    if not os.path.exists(filepath):
+        print(f"  WARNING: {filepath} not found")
+        return pd.DataFrame()
 
-        for old, new in column_mapping.items():
-            if old in df.columns:
-                df = df.rename(columns={old: new})
+    df = pd.read_csv(filepath)
+    print(f"  Loaded human_vital_signs_2024: {df.shape}")
 
-        # Map risk category to numeric risk score
-        if "risk_category" in df.columns:
-            risk_mapping = {
-                "Low Risk": 25,
-                "Medium Risk": 55,
-                "High Risk": 80,
-                "Critical Risk": 95,
-            }
-            df["risk_score"] = df["risk_category"].map(risk_mapping)
-            df["risk_score"] = df["risk_score"].fillna(50)
+    mapped = pd.DataFrame()
+    mapped["heart_rate"] = pd.to_numeric(df.get("Heart Rate"), errors="coerce")
+    mapped["respiratory_rate"] = pd.to_numeric(df.get("Respiratory Rate"), errors="coerce")
+    mapped["temperature"] = pd.to_numeric(df.get("Body Temperature"), errors="coerce")
+    mapped["spo2"] = pd.to_numeric(df.get("Oxygen Saturation"), errors="coerce")
+    mapped["systolic_bp"] = pd.to_numeric(df.get("Systolic Blood Pressure"), errors="coerce")
+    mapped["diastolic_bp"] = pd.to_numeric(df.get("Diastolic Blood Pressure"), errors="coerce")
+    mapped["age"] = pd.to_numeric(df.get("Age"), errors="coerce")
+    mapped["gender"] = df.get("Gender")
+    mapped["weight"] = pd.to_numeric(df.get("Weight (kg)"), errors="coerce")
+    mapped["height"] = pd.to_numeric(df.get("Height (m)"), errors="coerce")
+    mapped["bmi"] = pd.to_numeric(df.get("Derived_BMI"), errors="coerce")
+    mapped["fall_detected"] = 0
+    mapped["glucose_level"] = np.nan
+
+    # Map Risk Category to risk_score
+    risk_map = {"Low Risk": 25, "Medium Risk": 55, "High Risk": 80, "Critical Risk": 95}
+    mapped["risk_score"] = df.get("Risk Category", pd.Series()).map(risk_map)
+
+    # Derive status
+    mapped["status"] = mapped.apply(lambda r: derive_status(r.to_dict()), axis=1)
+    mapped["source"] = "human_vital_signs"
+
+    return mapped
+
+
+def load_personal_health_data():
+    """Load and map personal_health_data.csv"""
+    filepath = os.path.join(DATASETS_DIR, "personal_health_data.csv")
+    if not os.path.exists(filepath):
+        print(f"  WARNING: {filepath} not found")
+        return pd.DataFrame()
+
+    df = pd.read_csv(filepath)
+    print(f"  Loaded personal_health_data: {df.shape}")
+
+    mapped = pd.DataFrame()
+    mapped["heart_rate"] = pd.to_numeric(df.get("Heart_Rate"), errors="coerce")
+    mapped["spo2"] = pd.to_numeric(df.get("Blood_Oxygen_Level"), errors="coerce")
+    mapped["skin_temperature"] = pd.to_numeric(df.get("Skin_Temperature"), errors="coerce")
+    mapped["sleep_duration"] = pd.to_numeric(df.get("Sleep_Duration"), errors="coerce")
+    mapped["stress_level"] = df.get("Stress_Level")
+    mapped["chronic_condition"] = df.get("Medical_Conditions")
+    mapped["age"] = pd.to_numeric(df.get("Age"), errors="coerce")
+    mapped["gender"] = df.get("Gender")
+    mapped["weight"] = pd.to_numeric(df.get("Weight"), errors="coerce")
+
+    # Height normalization: if > 3.0, it's in centimeters
+    height = pd.to_numeric(df.get("Height"), errors="coerce")
+    if height is not None and height.max() > 3.0:
+        height = height / 100.0
+        print("  NOTE: Height converted from cm to meters")
+    mapped["height"] = height
+
+    # Risk score from Health_Score
+    health_score = pd.to_numeric(df.get("Health_Score"), errors="coerce")
+    mapped["risk_score"] = 100 - health_score
+
+    # Anomaly flag
+    mapped["anomaly_flag"] = pd.to_numeric(df.get("Anomaly_Flag"), errors="coerce")
+
+    mapped["systolic_bp"] = np.nan
+    mapped["diastolic_bp"] = np.nan
+    mapped["temperature"] = mapped["skin_temperature"]
+    mapped["respiratory_rate"] = np.nan
+    mapped["glucose_level"] = np.nan
+    mapped["fall_detected"] = 0
+
+    mapped["status"] = mapped.apply(lambda r: derive_status(r.to_dict()), axis=1)
+    mapped["source"] = "personal_health_data"
+
+    return mapped
+
+
+def load_patients_data_with_alerts():
+    """Load and map patients_data_with_alerts.xlsx"""
+    filepath = os.path.join(DATASETS_DIR, "patients_data_with_alerts.xlsx")
+    if not os.path.exists(filepath):
+        print(f"  WARNING: {filepath} not found")
+        return pd.DataFrame()
+
+    try:
+        df = pd.read_excel(filepath)
+    except Exception as e:
+        print(f"  WARNING: Could not read xlsx file: {e}")
+        return pd.DataFrame()
+
+    print(f"  Loaded patients_data_with_alerts: {df.shape}")
+
+    mapped = pd.DataFrame()
+    mapped["heart_rate"] = pd.to_numeric(df.get("Heart Rate (bpm)"), errors="coerce")
+    mapped["spo2"] = pd.to_numeric(df.get("SpO2 Level (%)"), errors="coerce")
+    mapped["systolic_bp"] = pd.to_numeric(df.get("Systolic Blood Pressure (mmHg)"), errors="coerce")
+    mapped["diastolic_bp"] = pd.to_numeric(df.get("Diastolic Blood Pressure (mmHg)"), errors="coerce")
+    mapped["temperature"] = pd.to_numeric(df.get("Body Temperature (°C)"), errors="coerce")
+
+    # Normalize alert labels to uppercase
+    alert_cols = ["Heart Rate Alert", "SpO2 Level Alert", "Blood Pressure Alert", "Temperature Alert"]
+    for col in alert_cols:
+        if col in df.columns:
+            df[col] = df[col].astype(str).str.strip().str.upper()
+            df[col] = df[col].replace({"NORMAL": "NORMAL", "ABNORMAL": "ABNORMAL", "LOW": "LOW", "HIGH": "HIGH"})
+
+    fall_col = df.get("Fall Detection")
+    if fall_col is not None:
+        mapped["fall_detected"] = fall_col.map({"Yes": True, "No": False}).fillna(False).astype(int)
+    else:
+        mapped["fall_detected"] = 0
+
+    mapped["respiratory_rate"] = np.nan
+    mapped["glucose_level"] = np.nan
+    mapped["status"] = mapped.apply(lambda r: derive_status(r.to_dict()), axis=1)
+    mapped["source"] = "patients_data_with_alerts"
+
+    return mapped
+
+
+def load_healthcare_iot_target():
+    """Load and map healthcare_iot_target_dataset_5000.csv"""
+    filepath = os.path.join(DATASETS_DIR, "healthcare_iot_target_dataset_5000.csv")
+    if not os.path.exists(filepath):
+        print(f"  WARNING: {filepath} not found")
+        return pd.DataFrame()
+
+    df = pd.read_csv(filepath)
+    print(f"  Loaded healthcare_iot_target: {df.shape}")
+
+    mapped = pd.DataFrame()
+    mapped["temperature"] = pd.to_numeric(df.get("Temperature (°C)"), errors="coerce")
+    mapped["systolic_bp"] = pd.to_numeric(df.get("Systolic_BP (mmHg)"), errors="coerce")
+    mapped["diastolic_bp"] = pd.to_numeric(df.get("Diastolic_BP (mmHg)"), errors="coerce")
+    mapped["heart_rate"] = pd.to_numeric(df.get("Heart_Rate (bpm)"), errors="coerce")
+    mapped["battery_level"] = pd.to_numeric(df.get("Device_Battery_Level (%)"), errors="coerce")
+
+    # Map Target_Health_Status
+    status_map = {"Healthy": "NORMAL", "Unhealthy": "WARNING"}
+    mapped["target_status"] = df.get("Target_Health_Status", pd.Series()).map(status_map).fillna("NORMAL")
+
+    # Risk score from status
+    risk_map_iot = {"Healthy": 25, "Unhealthy": 75}
+    mapped["risk_score"] = df.get("Target_Health_Status", pd.Series()).map(risk_map_iot)
+
+    mapped["spo2"] = np.nan
+    mapped["respiratory_rate"] = np.nan
+    mapped["glucose_level"] = np.nan
+    mapped["fall_detected"] = 0
+
+    # Derive actual status using thresholds (may upgrade from WARNING)
+    mapped["status"] = mapped.apply(lambda r: derive_status(r.to_dict()), axis=1)
+    mapped["source"] = "healthcare_iot_target"
+
+    return mapped
+
+
+def load_oxygen_dataset():
+    """Load and map Oxygen Dataset Final.csv with imputation."""
+    filepath = os.path.join(DATASETS_DIR, "Oxygen Dataset Final.csv")
+    if not os.path.exists(filepath):
+        print(f"  WARNING: {filepath} not found")
+        return pd.DataFrame()
+
+    df = pd.read_csv(filepath)
+    print(f"  Loaded Oxygen Dataset Final: {df.shape}")
+
+    from sklearn.impute import SimpleImputer
+
+    # Apply median imputation for numeric columns
+    numeric_cols = df.select_dtypes(include=[np.number]).columns
+    imputer = SimpleImputer(strategy="median")
+    df[numeric_cols] = imputer.fit_transform(df[numeric_cols])
+
+    mapped = pd.DataFrame()
+    mapped["spo2"] = pd.to_numeric(df.get("spo2"), errors="coerce")
+    mapped["heart_rate"] = pd.to_numeric(df.get("pr"), errors="coerce")  # pulse rate as proxy
+    mapped["oxy_flow"] = pd.to_numeric(df.get("oxy_flow"), errors="coerce")
+
+    mapped["temperature"] = np.nan
+    mapped["systolic_bp"] = np.nan
+    mapped["diastolic_bp"] = np.nan
+    mapped["respiratory_rate"] = np.nan
+    mapped["glucose_level"] = np.nan
+    mapped["fall_detected"] = 0
+    mapped["skin_temperature"] = np.nan
+    mapped["battery_level"] = np.nan
+
+    mapped["status"] = mapped.apply(lambda r: derive_status(r.to_dict()), axis=1)
+    mapped["source"] = "oxygen_dataset"
+
+    return mapped
+
+
+def load_health_data():
+    """Load and map Health data.csv"""
+    filepath = os.path.join(DATASETS_DIR, "Health data.csv")
+    if not os.path.exists(filepath):
+        print(f"  WARNING: {filepath} not found")
+        return pd.DataFrame()
+
+    df = pd.read_csv(filepath)
+    print(f"  Loaded Health data: {df.shape}")
+
+    mapped = pd.DataFrame()
+
+    # Try different possible column names
+    for col_name in ["Pulse", "pulse", "Heart Rate", "heart_rate"]:
+        if col_name in df.columns:
+            mapped["heart_rate"] = pd.to_numeric(df[col_name], errors="coerce")
+            break
+    if "heart_rate" not in mapped.columns:
+        mapped["heart_rate"] = np.nan
+
+    for col_name in ["Body Temperature", "body_temperature", "Temperature", "temperature"]:
+        if col_name in df.columns:
+            mapped["temperature"] = pd.to_numeric(df[col_name], errors="coerce")
+            break
+    if "temperature" not in mapped.columns:
+        mapped["temperature"] = np.nan
+
+    for col_name in ["SpO2", "spo2", "Oxygen Saturation"]:
+        if col_name in df.columns:
+            mapped["spo2"] = pd.to_numeric(df[col_name], errors="coerce")
+            break
+    if "spo2" not in mapped.columns:
+        mapped["spo2"] = np.nan
+
+    # Status mapping
+    for col_name in ["Status", "status"]:
+        if col_name in df.columns:
+            mapped["original_status"] = df[col_name]
+            break
+
+    mapped["systolic_bp"] = np.nan
+    mapped["diastolic_bp"] = np.nan
+    mapped["respiratory_rate"] = np.nan
+    mapped["glucose_level"] = np.nan
+    mapped["fall_detected"] = 0
+
+    mapped["status"] = mapped.apply(lambda r: derive_status(r.to_dict()), axis=1)
+    mapped["source"] = "health_data"
+
+    return mapped
+
+
+def load_heart_rate_data():
+    """Load heart_rate.csv for forecasting model."""
+    filepath = os.path.join(DATASETS_DIR, "heart_rate.csv")
+    if not os.path.exists(filepath):
+        print(f"  WARNING: {filepath} not found")
+        return pd.DataFrame()
+
+    df = pd.read_csv(filepath)
+    print(f"  Loaded heart_rate: {df.shape}")
+    return df
+
+
+def prepare_status_classification_data():
+    """Prepare combined dataset for status classification model."""
+    print("\n--- Preparing Status Classification Data ---")
+
+    dfs = []
+    dfs.append(load_synthetic_patient_monitoring())
+    dfs.append(load_human_vital_signs())
+    dfs.append(load_patients_data_with_alerts())
+    dfs.append(load_healthcare_iot_target())
+    dfs.append(load_health_data())
+
+    # Filter out empty DataFrames
+    dfs = [df for df in dfs if not df.empty]
+
+    if not dfs:
+        print("  ERROR: No data available for status classification!")
+        return pd.DataFrame()
+
+    combined = pd.concat(dfs, ignore_index=True)
+
+    # Select features available across datasets
+    feature_cols = ["heart_rate", "spo2", "temperature", "systolic_bp",
+                    "diastolic_bp", "respiratory_rate", "glucose_level", "fall_detected"]
+    available_cols = [c for c in feature_cols if c in combined.columns]
+
+    result = combined[available_cols + ["status"]].copy()
+
+    # Fill missing numeric values with median
+    for col in available_cols:
+        if col != "fall_detected":
+            median_val = result[col].median()
+            result[col] = result[col].fillna(median_val if not np.isnan(median_val) else 0)
         else:
-            df["risk_score"] = 50
+            result[col] = result[col].fillna(0)
 
-        # Create unified schema
-        df = self._create_unified_columns(df)
+    # Drop rows with missing status
+    result = result.dropna(subset=["status"])
+    print(f"  Status classification dataset: {result.shape}")
+    print(f"  Class distribution:\n{result['status'].value_counts().to_string()}")
 
-        # Derive status
-        if "status" not in df.columns:
-            df["status"] = df.apply(derive_status, axis=1)
+    return result
 
-        logger.info(f"Processed Human Vital Signs Dataset: {df.shape}")
-        return df
 
-    def load_personal_health_data(self) -> pd.DataFrame:
-        """Load personal_health_data.csv"""
-        path = self.datasets_path / "personal_health_data.csv"
-        df = pd.read_csv(path)
-        logger.info(f"Loaded Personal Health Data: {df.shape}")
+def prepare_risk_regression_data():
+    """Prepare combined dataset for risk score regression model."""
+    print("\n--- Preparing Risk Regression Data ---")
 
-        # Rename columns
-        column_mapping = {
-            "User_ID": "patient_id",
-            "Health_Score": "health_score",
-            "Anomaly_Flag": "anomaly_flag",
-            "Sleep": "sleep_duration",
-            "Stress": "stress_level",
-            "BloodOxygen": "spo2",
-        }
+    dfs = []
 
-        for old, new in column_mapping.items():
-            if old in df.columns:
-                df = df.rename(columns={old: new})
+    # personal_health_data with Health_Score-based risk
+    personal = load_personal_health_data()
+    if not personal.empty and "risk_score" in personal.columns:
+        dfs.append(personal)
 
-        # Compute risk score from health score
-        if "health_score" in df.columns:
-            df["risk_score"] = 100 - df["health_score"]
+    # human_vital_signs with Risk Category-based risk
+    human = load_human_vital_signs()
+    if not human.empty and "risk_score" in human.columns:
+        dfs.append(human)
+
+    # healthcare_iot_target
+    iot = load_healthcare_iot_target()
+    if not iot.empty and "risk_score" in iot.columns:
+        dfs.append(iot)
+
+    dfs = [df for df in dfs if not df.empty]
+
+    if not dfs:
+        print("  ERROR: No data available for risk regression!")
+        return pd.DataFrame()
+
+    combined = pd.concat(dfs, ignore_index=True)
+
+    # For rows without explicit risk_score, derive from status
+    mask = combined["risk_score"].isna()
+    combined.loc[mask, "risk_score"] = combined.loc[mask, "status"].map(
+        {"NORMAL": 20, "WARNING": 50, "CRITICAL": 75, "EMERGENCY": 92}
+    )
+
+    feature_cols = ["heart_rate", "spo2", "temperature", "systolic_bp",
+                    "diastolic_bp", "respiratory_rate", "glucose_level",
+                    "skin_temperature", "battery_level", "fall_detected"]
+    available_cols = [c for c in feature_cols if c in combined.columns]
+
+    result = combined[available_cols + ["risk_score"]].copy()
+
+    # Fill missing values
+    for col in available_cols:
+        if col != "fall_detected":
+            median_val = result[col].median()
+            result[col] = result[col].fillna(median_val if not pd.isna(median_val) else 0)
         else:
-            df["risk_score"] = 50
+            result[col] = result[col].fillna(0)
 
-        # Create unified schema
-        df = self._create_unified_columns(df)
+    result = result.dropna(subset=["risk_score"])
+    # Clip risk_score to 0-100
+    result["risk_score"] = result["risk_score"].clip(0, 100)
 
-        logger.info(f"Processed Personal Health Data: {df.shape}")
-        return df
+    print(f"  Risk regression dataset: {result.shape}")
+    print(f"  Risk score stats: mean={result['risk_score'].mean():.1f}, "
+          f"std={result['risk_score'].std():.1f}")
 
-    def load_healthcare_iot_target_dataset(self) -> pd.DataFrame:
-        """Load healthcare_iot_target_dataset_5000.csv"""
-        path = self.datasets_path / "healthcare_iot_target_dataset_5000.csv"
-        df = pd.read_csv(path)
-        logger.info(f"Loaded Healthcare IoT Target Dataset: {df.shape}")
+    return result
 
-        # Map columns
-        column_mapping = {
-            "patient_id": "patient_id",
-            "target_blood_pressure_systolic": "systolic_bp",
-            "target_blood_pressure_diastolic": "diastolic_bp",
-            "target_heart_rate": "heart_rate",
-            "battery_level": "battery_level",
-            "sensor_type": "sensor_type",
-        }
 
-        for old, new in column_mapping.items():
-            if old in df.columns:
-                df = df.rename(columns={old: new})
+def prepare_anomaly_detection_data():
+    """Prepare dataset for anomaly detection model."""
+    print("\n--- Preparing Anomaly Detection Data ---")
 
-        # Create unified schema
-        df = self._create_unified_columns(df)
+    dfs = []
 
-        logger.info(f"Processed Healthcare IoT Target Dataset: {df.shape}")
-        return df
+    personal = load_personal_health_data()
+    if not personal.empty:
+        dfs.append(personal)
 
-    def load_heart_rate_forecast_data(self) -> pd.DataFrame:
-        """Load heart_rate.csv for time series forecasting."""
-        path = self.datasets_path / "heart_rate.csv"
-        df = pd.read_csv(path)
-        logger.info(f"Loaded Heart Rate Data: {df.shape}")
+    iot = load_healthcare_iot_target()
+    if not iot.empty:
+        dfs.append(iot)
 
-        # Create lag features
-        for i in range(1, 5):
-            col_name = f"T{i}" if f"T{i}" in df.columns else f"hr_lag_{i}"
-            if col_name not in df.columns and f"T{i}" in df.columns:
-                df = df.rename(columns={f"T{i}": col_name})
+    oxygen = load_oxygen_dataset()
+    if not oxygen.empty:
+        dfs.append(oxygen)
 
-        logger.info(f"Processed Heart Rate Data: {df.shape}")
-        return df
+    dfs = [df for df in dfs if not df.empty]
 
-    def _create_unified_columns(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Ensure all unified schema columns exist with appropriate defaults."""
-        for feature in ALL_INPUT_FEATURES:
-            if feature not in df.columns:
-                df[feature] = self.default_values.get(feature)
+    if not dfs:
+        print("  ERROR: No data available for anomaly detection!")
+        return pd.DataFrame(), None
 
-        # Add patient_id if not exists
-        if "patient_id" not in df.columns:
-            df["patient_id"] = f"patient-{np.arange(len(df)) % 5 + 1}"
+    combined = pd.concat(dfs, ignore_index=True)
 
-        return df
+    feature_cols = ["heart_rate", "spo2", "temperature", "systolic_bp",
+                    "diastolic_bp", "respiratory_rate", "glucose_level",
+                    "skin_temperature", "battery_level"]
+    available_cols = [c for c in feature_cols if c in combined.columns]
 
-    def prepare_status_classification_data(self) -> Tuple[pd.DataFrame, pd.Series]:
-        """
-        Prepare training data for status classification.
-        Returns X (features) and y (target status).
-        """
-        dfs = []
+    result = combined[available_cols].copy()
 
-        # Load primary datasets
-        try:
-            dfs.append(self.load_synthetic_patient_dataset())
-        except Exception as e:
-            logger.warning(f"Could not load Synthetic Patient Dataset: {e}")
+    # Fill missing with median
+    for col in available_cols:
+        median_val = result[col].median()
+        result[col] = result[col].fillna(median_val if not pd.isna(median_val) else 0)
 
-        try:
-            dfs.append(self.load_human_vital_signs_dataset())
-        except Exception as e:
-            logger.warning(f"Could not load Human Vital Signs Dataset: {e}")
+    # Get anomaly labels if available
+    labels = combined.get("anomaly_flag")
 
-        # Combine datasets
-        df = pd.concat(dfs, ignore_index=True)
-        df = df.dropna(subset=["status"])
+    print(f"  Anomaly detection dataset: {result.shape}")
+    if labels is not None:
+        labels = labels.fillna(0).astype(int)
+        print(f"  Anomaly labels available: {labels.sum()} anomalies out of {len(labels)} samples")
 
-        logger.info(f"Combined training data for status classification: {df.shape}")
+    return result, labels
 
-        # Select input features
-        X = df[ALL_INPUT_FEATURES].copy()
-        y = df["status"].copy()
 
-        # Fill missing values
-        for col in X.columns:
-            if col in ["gender", "activity_level", "exercise_type", "stress_level", "chronic_condition"]:
-                X[col] = X[col].fillna("Unknown")
-            else:
-                X[col] = X[col].fillna(self.default_values.get(col, 0))
+def prepare_heart_rate_forecasting_data():
+    """Prepare dataset for heart rate forecasting using lag features."""
+    print("\n--- Preparing Heart Rate Forecasting Data ---")
 
-        logger.info(f"Status classification data: X={X.shape}, y={y.shape}")
-        return X, y
+    df = load_heart_rate_data()
+    if df.empty:
+        return pd.DataFrame()
 
-    def prepare_risk_regression_data(self) -> Tuple[pd.DataFrame, pd.Series]:
-        """
-        Prepare training data for risk score regression.
-        Returns X (features) and y (risk_score).
-        """
-        dfs = []
+    # Stack all four time series (T1, T2, T3, T4)
+    all_series = []
+    for col in ["T1", "T2", "T3", "T4"]:
+        if col in df.columns:
+            series = df[col].dropna().values
+            all_series.append(series)
 
-        try:
-            dfs.append(self.load_personal_health_data())
-        except Exception as e:
-            logger.warning(f"Could not load Personal Health Data: {e}")
+    if not all_series:
+        print("  ERROR: No time series columns found!")
+        return pd.DataFrame()
 
-        try:
-            dfs.append(self.load_human_vital_signs_dataset())
-        except Exception as e:
-            logger.warning(f"Could not load Human Vital Signs Dataset: {e}")
+    # Create supervised dataset with lag features
+    n_lags = 5
+    rows = []
 
-        try:
-            dfs.append(self.load_healthcare_iot_target_dataset())
-        except Exception as e:
-            logger.warning(f"Could not load Healthcare IoT Target Dataset: {e}")
+    for series in all_series:
+        for i in range(n_lags, len(series)):
+            row = {}
+            for lag in range(1, n_lags + 1):
+                row[f"hr_lag_{lag}"] = series[i - lag]
+            row["next_heart_rate"] = series[i]
+            rows.append(row)
 
-        df = pd.concat(dfs, ignore_index=True)
-        df = df.dropna(subset=["risk_score"])
+    result = pd.DataFrame(rows)
 
-        logger.info(f"Combined training data for risk regression: {df.shape}")
+    if len(result) < 100:
+        print(f"  WARNING: Only {len(result)} samples after creating lag features (< 100).")
+        print("  Model will still be trained for demo purposes.")
+    else:
+        print(f"  Heart rate forecasting dataset: {result.shape}")
 
-        X = df[ALL_INPUT_FEATURES].copy()
-        y = df["risk_score"].copy()
-
-        # Fill missing values
-        for col in X.columns:
-            if col in ["gender", "activity_level", "exercise_type", "stress_level", "chronic_condition"]:
-                X[col] = X[col].fillna("Unknown")
-            else:
-                X[col] = X[col].fillna(self.default_values.get(col, 0))
-
-        # Ensure risk_score is in valid range
-        y = y.clip(0, 100)
-
-        logger.info(f"Risk regression data: X={X.shape}, y={y.shape}")
-        return X, y
-
-    def prepare_anomaly_detection_data(self) -> pd.DataFrame:
-        """
-        Prepare training data for anomaly detection.
-        Returns X with both normal and anomalous samples.
-        """
-        dfs = []
-
-        try:
-            dfs.append(self.load_personal_health_data())
-        except Exception as e:
-            logger.warning(f"Could not load Personal Health Data: {e}")
-
-        try:
-            dfs.append(self.load_synthetic_patient_dataset())
-        except Exception as e:
-            logger.warning(f"Could not load Synthetic Patient Dataset: {e}")
-
-        df = pd.concat(dfs, ignore_index=True)
-
-        # Select vital features for anomaly detection
-        vital_cols = [col for col in VITAL_FEATURES if col in df.columns]
-        X = df[vital_cols].copy()
-
-        # Fill missing values
-        for col in X.columns:
-            X[col] = X[col].fillna(self.default_values.get(col, 0))
-
-        logger.info(f"Anomaly detection data: X={X.shape}")
-        return X
-
-    def prepare_heart_rate_forecast_data(self) -> Tuple[pd.DataFrame, pd.Series]:
-        """
-        Prepare training data for heart rate forecasting.
-        Creates lag features and target variable.
-        """
-        try:
-            df = self.load_heart_rate_forecast_data()
-        except Exception as e:
-            logger.warning(f"Could not load Heart Rate Data: {e}")
-            # Create synthetic data if loading fails
-            df = pd.DataFrame({
-                "T1": np.random.randint(60, 100, 100),
-                "T2": np.random.randint(60, 100, 100),
-                "T3": np.random.randint(60, 100, 100),
-                "T4": np.random.randint(60, 100, 100),
-            })
-
-        # Use T1-T3 as features, T4 as target
-        X = df[["T1", "T2", "T3"]].copy()
-        y = df["T4"].copy() if "T4" in df.columns else df.iloc[:, -1].copy()
-
-        # Fill any missing values
-        X = X.fillna(X.mean())
-        y = y.fillna(y.mean())
-
-        logger.info(f"Heart rate forecast data: X={X.shape}, y={y.shape}")
-        return X, y
+    return result
 
 
 if __name__ == "__main__":
-    loader = DatasetLoader()
+    print("=" * 60)
+    print("  DATASET PREPARATION")
+    print("=" * 60)
 
-    # Test loading datasets
-    print("\n" + "=" * 80)
-    print("Testing Dataset Loading")
-    print("=" * 80 + "\n")
+    status_df = prepare_status_classification_data()
+    risk_df = prepare_risk_regression_data()
+    anomaly_df, anomaly_labels = prepare_anomaly_detection_data()
+    hr_df = prepare_heart_rate_forecasting_data()
 
-    try:
-        X, y = loader.prepare_status_classification_data()
-        print(f"Status Classification Data: {X.shape}, target: {y.shape}")
-        print(f"  Classes: {y.unique()}")
-    except Exception as e:
-        print(f"Status Classification Error: {e}")
-
-    try:
-        X, y = loader.prepare_risk_regression_data()
-        print(f"Risk Regression Data: {X.shape}, target: {y.shape}")
-        print(f"  Risk Score Range: {y.min():.2f} - {y.max():.2f}")
-    except Exception as e:
-        print(f"Risk Regression Error: {e}")
-
-    try:
-        X = loader.prepare_anomaly_detection_data()
-        print(f"Anomaly Detection Data: {X.shape}")
-    except Exception as e:
-        print(f"Anomaly Detection Error: {e}")
-
-    try:
-        X, y = loader.prepare_heart_rate_forecast_data()
-        print(f"Heart Rate Forecast Data: {X.shape}, target: {y.shape}")
-        print(f"  Heart Rate Range: {y.min():.0f} - {y.max():.0f}")
-    except Exception as e:
-        print(f"Heart Rate Forecast Error: {e}")
-
-    print("\n" + "=" * 80)
+    print("\n" + "=" * 60)
+    print("  PREPARATION COMPLETE")
+    print("=" * 60)

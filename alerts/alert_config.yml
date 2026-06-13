@@ -1,0 +1,28 @@
+# Email Alert Configuration for Smart Health Monitoring IoT System
+# Environment variables override these values when set.
+
+email:
+  smtp_host: "smtp.gmail.com"
+  smtp_port: 587
+  smtp_user: ""             # Set via env: ALERT_SMTP_USER
+  smtp_password: ""         # Set via env: ALERT_SMTP_PASSWORD
+  sender_name: "Smart Health Monitor"
+  use_tls: true
+
+doctors:
+  - name: "Dr. Arben Krasniqi"
+    email: "doctor@hospital.com"   # Set via env: ALERT_DOCTOR_EMAIL
+    receives_severity:
+      - CRITICAL
+      - HIGH
+    patients: "all"
+
+rate_limiting:
+  enabled: true
+  cooldown_minutes: 5
+  max_emails_per_hour: 20
+
+thresholds:
+  send_on_fall_detected: true
+  send_on_anomaly: false
+  minimum_risk_score: 70

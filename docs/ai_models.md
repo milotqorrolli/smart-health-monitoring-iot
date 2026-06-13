@@ -1,415 +1,148 @@
-# Smart Health Monitoring - AI/ML Models
+# AI Models
 
 ## Overview
 
-The Smart Health Monitoring system includes four machine learning models that provide real-time AI-powered health assessment, risk scoring, anomaly detection, and heart rate forecasting.
+The system uses 4 machine learning models trained offline on healthcare datasets, loaded at runtime by Spark Structured Streaming for real-time inference.
 
-**Important Disclaimer**: These models are for educational simulation only and provide no clinical validity. Do not use for real medical decisions.
+All models use scikit-learn and are serialized with joblib.
 
-## Models Overview
-
-| Model | Type | Algorithm | Output | Use Case |
-|-------|------|-----------|--------|----------|
-| Status Classifier | Classification | RandomForest | NORMAL/WARNING/CRITICAL/EMERGENCY | Real-time health status |
-| Risk Regressor | Regression | RandomForest | Risk Score (0-100) | Quantified health risk |
-| Anomaly Detector | Anomaly Detection | IsolationForest | is_anomaly, anomaly_score | Detect unusual readings |
-| Heart Rate Forecaster | Time Series | RandomForest | Predicted next HR | Heart rate trend |
+---
 
 ## 1. Status Classification Model
 
-**File**: `models/status_classifier.pkl`
+**File:** `models/status_classifier.pkl`
 
-### Purpose
-Predicts the current health status of a patient based on demographic, vital, and activity features.
+**Purpose:** Predict current patient health status.
 
-### Input Features
-30 features across 5 categories:
-- **Demographics**: age, gender, weight, height, bmi (5)
-- **Vital Signs**: heart_rate, spo2, temperature, systolic_bp, diastolic_bp, respiratory_rate, glucose_level, skin_temperature (8)
-- **Activity**: activity_level, exercise_type, exercise_intensity, steps, stress_level, sleep_duration, sleep_quality, screen_time, notifications_received (9)
-- **Sensors**: fall_detected, battery_level (2)
-- **Medical**: chronic_condition, smoker, medication, predicted_disease_simulated (4)
+**Output classes:** NORMAL, WARNING, CRITICAL, EMERGENCY
 
-### Output Classes
-1. **NORMAL** (75-80% of samples)
-   - All vital signs within normal ranges
-   - No fall detected
-   - Risk profile stable
+**Algorithm:** RandomForestClassifier vs GradientBoostingClassifier (best F1 selected)
 
-2. **WARNING** (12-15% of samples)
-   - One or more vital signs mildly abnormal
-   - Elevated stress or poor sleep
-   - Risk score 40-60
+**Input Features:**
+- heart_rate, spo2, temperature, systolic_bp, diastolic_bp
+- respiratory_rate, glucose_level, fall_detected
 
-3. **CRITICAL** (5-8% of samples)
-   - Multiple abnormal vital signs
-   - Severe deviations from baseline
-   - Risk score 60-85
+**Training Data:**
+1. Synthetic_patient-HealthCare-Monitoring_dataset.csv (primary)
+2. human_vital_signs_dataset_2024.csv
+3. patients_data_with_alerts.xlsx
+4. healthcare_iot_target_dataset_5000.csv
+5. Health data.csv
 
-4. **EMERGENCY** (1-3% of samples)
-   - Critical vital signs
-   - Extreme deviations
-   - Fall detected + high HR
-   - Risk score >85
+**Target Engineering:** Uses `derive_status()` function with clinical thresholds to label training data.
 
-### Algorithm Details
-- **Algorithm**: RandomForestClassifier
-- **Hyperparameters**:
-  - n_estimators: 100 trees
-  - max_depth: 15 levels
-  - min_samples_split: 5
-  - min_samples_leaf: 2
-- **Train/Test Split**: 80/20
-- **Preprocessing**: 
-  - Numeric features scaled with StandardScaler
-  - Categorical features encoded with OneHotEncoder
-  - Missing values imputed with median/mode
+**Metrics:** Accuracy, Precision (macro), Recall (macro), F1 (macro), Confusion Matrix
 
-### Performance Metrics
-- Accuracy: ~92% (typical)
-- Precision (weighted): ~91%
-- Recall (weighted): ~92%
-- F1-Score: ~91%
-
-### Deployment
-```python
-import pickle
-with open('models/status_classifier.pkl', 'rb') as f:
-    model = pickle.load(f)
-prediction = model.predict(X_preprocessed)  # Returns one of 4 classes
-```
+---
 
 ## 2. Risk Score Regression Model
 
-**File**: `models/risk_regressor.pkl`
+**File:** `models/risk_regressor.pkl`
 
-### Purpose
-Predicts a numeric health risk score from 0 to 100, indicating overall patient risk level.
+**Purpose:** Predict numeric health risk score.
 
-### Input Features
-Same 30 features as Status Classifier
+**Output:** risk_score (0–100)
 
-### Output
-**Risk Score**: 0-100
-- 0-24: LOW
-- 25-44: MEDIUM
-- 45-69: HIGH
-- 70-100: CRITICAL
+**Algorithm:** RandomForestRegressor vs GradientBoostingRegressor (best RMSE selected)
 
-### Derivation Rules
-If trained dataset provides labels, uses:
-- Health_Score datasets: risk = 100 - health_score
-- Risk Category: Low→25, Medium→55, High→80, Critical→95
-- Otherwise: derived from rule-based thresholds
+**Input Features:**
+- heart_rate, spo2, temperature, systolic_bp, diastolic_bp
+- respiratory_rate, glucose_level, skin_temperature, battery_level, fall_detected
 
-### Algorithm Details
-- **Algorithm**: RandomForestRegressor
-- **Hyperparameters**: 
-  - Same as Status Classifier
-  - n_estimators: 100
-  - max_depth: 15
-  - min_samples_split: 5
-  - min_samples_leaf: 2
-- **Loss Metric**: Mean Squared Error (MSE)
+**Training Data:**
+1. personal_health_data.csv → risk_score = 100 - Health_Score
+2. human_vital_signs_dataset_2024.csv → Risk Category mapped to numeric
+3. healthcare_iot_target_dataset_5000.csv → Health Status mapped to score
 
-### Performance Metrics
-- MAE (Mean Absolute Error): ~5.2 points
-- RMSE (Root Mean Squared Error): ~7.1 points
-- R² Score: ~0.88 (explains 88% of variance)
+**Risk Level Derivation:**
+- 0–30 → LOW
+- 31–55 → MEDIUM
+- 56–75 → HIGH
+- 76–100 → CRITICAL
 
-### Medical Thresholds (Rule-Based Fallback)
+**Metrics:** MAE, RMSE, R²
 
-If model unavailable, risk is calculated as:
-
-**Heart Rate**:
-- Normal (60-100): 0 points
-- Warning (50-59, 101-130): 10 points
-- Critical (40-49, 131-150): 20 points
-- Emergency (<40, >150): 30 points
-
-**SpO2**:
-- Normal (≥95): 0 points
-- Warning (90-94): 10 points
-- Critical (85-89): 20 points
-- Emergency (<85): 30 points
-
-**Temperature**:
-- Normal (36-37.8): 0 points
-- Warning (35-35.9, 37.9-38.9): 10 points
-- Critical (39-39.9): 20 points
-- Emergency (≥40, <35): 30 points
-
-**Systolic BP**:
-- Normal (90-140): 0 points
-- Warning (141-160): 10 points
-- Critical (161-200): 20 points
-- Emergency (>200, <80): 30 points
-
-**Diastolic BP**:
-- Normal (60-90): 0 points
-- Warning (91-100): 10 points
-- Critical (101-130): 20 points
-- Emergency (>130, <50): 30 points
-
-**Other Factors**:
-- Fall detected: +15 points
-- Poor sleep quality: +5 points
-- High stress: +10 points
-- Low battery: +5 points
-
-Total risk = sum of component scores (capped at 100)
+---
 
 ## 3. Anomaly Detection Model
 
-**File**: `models/anomaly_detector.pkl`
+**File:** `models/anomaly_detector.pkl`
 
-### Purpose
-Detects unusual or suspicious sensor readings that deviate from learned normal patterns.
+**Purpose:** Detect unusual sensor reading combinations.
 
-### Input Features (8 vital signs)
-- heart_rate
-- spo2
-- temperature
-- systolic_bp
-- diastolic_bp
-- respiratory_rate
-- glucose_level
-- skin_temperature
+**Output:**
+- is_anomaly (boolean)
+- anomaly_score (float, negative = more anomalous)
+- anomaly_type (text)
 
-### Output
-1. **is_anomaly**: Boolean (true/false)
-2. **anomaly_score**: 0-1 (higher = more anomalous)
-3. **anomaly_type**: Description (e.g., "Sensor Spike", "Impossible Reading")
+**Algorithm:** IsolationForest (contamination=0.1, random_state=42)
 
-### Algorithm Details
-- **Algorithm**: IsolationForest (unsupervised)
-- **Contamination**: 0.05 (expects 5% anomalies)
-- **n_estimators**: 100 trees
-- **Random State**: 42 (reproducible)
-- **Preprocessing**: 
-  - StandardScaler normalization
-  - Scaler saved as `models/anomaly_scaler.pkl`
+**Input Features:**
+- heart_rate, spo2, temperature, systolic_bp, diastolic_bp
+- respiratory_rate, glucose_level, skin_temperature, battery_level
 
-### How It Works
-1. **Isolation Forest** isolates outliers by randomly selecting features and split values
-2. Points that isolate quickly are anomalies (few splits needed)
-3. Points needing many splits are normal (deep in the forest)
+**Training Data:**
+1. personal_health_data.csv (Anomaly_Flag as supervised reference)
+2. healthcare_iot_target_dataset_5000.csv
+3. Oxygen Dataset Final.csv (with median imputation)
 
-### Anomaly Score Interpretation
-- Score < -0.1: Normal (high confidence)
-- Score -0.1 to 0.2: Borderline
-- Score > 0.2: Anomalous (high confidence)
+**Metrics:** Contamination ratio, anomalies detected, precision/recall (when labels available)
 
-### Use Cases
-- Sensor malfunction detection
-- Data transmission errors
-- Unrealistic vital sign combinations
-- Device drift detection
-
-### Performance Metrics
-- Detection Rate: ~95%
-- False Positive Rate: ~2%
-- ROC-AUC: ~0.93 (if labels available)
+---
 
 ## 4. Heart Rate Forecasting Model
 
-**File**: `models/heart_rate_forecaster.pkl`
+**File:** `models/heart_rate_forecaster.pkl`
 
-### Purpose
-Predicts the next heart rate reading based on recent heart rate history (lag-1 ARIMA-like approach).
+**Purpose:** Predict the next heart rate value.
 
-### Input Features (3 lag features)
-- T1: 3 readings ago
-- T2: 2 readings ago
-- T3: 1 reading ago
+**Output:** predicted_next_heart_rate
 
-### Output
-**predicted_next_heart_rate**: Numeric value (30-200 bpm range)
+**Algorithm:** RandomForestRegressor or GradientBoostingRegressor (best RMSE)
 
-### Algorithm Details
-- **Algorithm**: RandomForestRegressor
-- **Features**: 3 temporal lags
-- **Target**: Next heart rate (T4)
-- **Training Data**: `heart_rate.csv` time series
-- **Preprocessing**:
-  - StandardScaler normalization
-  - Scaler saved as `models/heart_rate_scaler.pkl`
+**Input Features:** hr_lag_1, hr_lag_2, hr_lag_3, hr_lag_4, hr_lag_5
 
-### Performance Metrics
-- MAE: ~2.1 bpm
-- RMSE: ~3.5 bpm
-- R² Score: ~0.82
+**Training Data:** heart_rate.csv exclusively
+- Columns T1, T2, T3, T4 stacked into supervised dataset
+- 5 lag features created per time step
+- Target: next value in sequence
 
-### Use Cases
-- Early warning of heart rate changes
-- Trend analysis
-- Arrhythmia detection
-- Activity level inference
+**Metrics:** MAE, RMSE, R²
 
-## Model Training Pipeline
+---
 
-### Data Sources
-Models are trained on synthetic and real datasets:
+## Preprocessing Pipeline
 
-**Status Classifier**:
-- Synthetic_patient-HealthCare-Monitoring_dataset.csv
-- human_vital_signs_dataset_2024.csv
-- patients_data_with_alerts.xlsx (labels)
-- healthcare_iot_target_dataset_5000.csv
+**File:** `models/preprocessing_pipeline.pkl`
 
-**Risk Regressor**:
-- personal_health_data.csv (Health_Score)
-- human_vital_signs_dataset_2024.csv (Risk Category)
-- healthcare_iot_target_dataset_5000.csv
+A scikit-learn ColumnTransformer that handles:
+- Numeric features: SimpleImputer (median) + StandardScaler
+- Categorical features: SimpleImputer (constant "Unknown") + OneHotEncoder
+- Boolean features: SimpleImputer (0)
 
-**Anomaly Detector**:
-- personal_health_data.csv (Anomaly_Flag)
-- Synthetic_patient-HealthCare-Monitoring_dataset.csv
-- Any dataset with abnormal alert flags
+**Feature Schema:** `models/feature_schema.json` — ordered list of expected features.
 
-**Heart Rate Forecaster**:
-- heart_rate.csv (time series)
+---
 
-### Training Steps
-```bash
-# 1. Audit datasets
-python ml/data_audit.py
+## Model Fallback Strategy
 
-# 2. Prepare datasets
-python ml/prepare_datasets.py
+If any model file is missing at Spark startup:
+- A warning is logged
+- Rule-based logic is used instead
+- The system never crashes due to missing models
 
-# 3. Train models
-python ml/train_models.py
+Rule-based fallback:
+- Status: `derive_status()` using clinical thresholds
+- Risk score: derived from status (NORMAL=20, WARNING=50, CRITICAL=75, EMERGENCY=92)
+- Anomaly: not detected (is_anomaly=False)
+- HR forecast: None
 
-# 4. Output artifacts
-# - models/status_classifier.pkl
-# - models/risk_regressor.pkl
-# - models/anomaly_detector.pkl
-# - models/heart_rate_forecaster.pkl
-# - models/anomaly_scaler.pkl
-# - models/heart_rate_scaler.pkl
-# - models/model_metadata.json
-# - models/model_metrics.json
-# - models/feature_schema.json
-```
+---
 
-## Model Versioning
+## Limitations
 
-### Metadata File
-`models/model_metadata.json` contains:
-```json
-{
-  "models": {
-    "status_classifier": {
-      "type": "classification",
-      "algorithm": "RandomForestClassifier",
-      "file": "status_classifier.pkl",
-      "input_features": [...],
-      "output": "predicted_status",
-      "classes": ["NORMAL", "WARNING", "CRITICAL", "EMERGENCY"]
-    },
-    ...
-  },
-  "metrics": {...},
-  "feature_schema": {...}
-}
-```
-
-### Versioning Strategy
-- Version tagged in metadata: `model_version: "v1.0.0"`
-- Timestamp of training: `trained_at: "2024-06-11T12:00:00Z"`
-- Data source checksum: `data_hash: "abc123..."`
-
-## Inference Pipeline
-
-### Real-Time Inference (Spark Streaming)
-
-```python
-# 1. Load model
-status_clf = pickle.load(open('models/status_classifier.pkl', 'rb'))
-
-# 2. Prepare features (unified schema)
-X = pd.DataFrame({
-    'age': 64, 'gender': 'Female', 'weight': 78.5, ...
-})
-
-# 3. Predict
-predicted_status = status_clf.predict(X)[0]  # Returns string
-
-# 4. Use prediction
-if predicted_status == 'EMERGENCY':
-    generate_critical_alert()
-```
-
-### Fallback Mechanism
-If models cannot be loaded (missing files, wrong format):
-1. Log warning message
-2. Fall back to rule-based status derivation
-3. Continue processing without ML predictions
-4. Alert users via dashboard
-
-## Model Maintenance
-
-### Monitoring Metrics
-- Prediction latency (target: <100ms)
-- Model memory usage (target: <500MB)
-- Accuracy drift over time
-- Feature importance changes
-
-### Retraining Triggers
-- Model accuracy drops below 85%
-- Distribution shift detected in input data
-- New datasets available
-- Quarterly scheduled retraining
-
-### A/B Testing
-- Run new model on subset of data
-- Compare predictions with current model
-- Evaluate metric improvements
-- Deploy if validation successful
-
-## Limitations and Assumptions
-
-1. **Educational Models**: Baseline implementations for learning
-2. **Synthetic Data**: Training data is mostly synthetic, not from real patients
-3. **No Clinical Validation**: Models not validated for medical accuracy
-4. **Feature Availability**: Assumes all features available (graceful degradation if missing)
-5. **Class Imbalance**: Models handle imbalanced classes but not optimized
-6. **No Personalization**: Generic models for all patients (could personalize per patient)
-7. **Concept Drift**: Models don't adapt online (requires retraining)
-
-## Future Enhancements
-
-1. **Advanced Algorithms**:
-   - LSTM/GRU for time-series forecasting
-   - Gradient Boosting (XGBoost, LightGBM)
-   - Neural networks (TensorFlow/PyTorch)
-   - Ensemble methods combining multiple models
-
-2. **Personalization**:
-   - Per-patient baseline models
-   - Transfer learning from patient cohorts
-   - Federated learning across institutions
-
-3. **Explainability**:
-   - SHAP values for feature importance
-   - LIME for local explanations
-   - Model card documentation
-
-4. **Robustness**:
-   - Calibration (confidence scores)
-   - Uncertainty quantification
-   - Adversarial robustness testing
-
-5. **Production**:
-   - Model serving (TensorFlow Serving, MLflow)
-   - Containerization (Docker)
-   - Model registry and versioning
-   - Automated retraining pipelines
-
-## References
-
-- [scikit-learn RandomForest](https://scikit-learn.org/stable/modules/ensemble.html#forests)
-- [IsolationForest Paper](https://dl.acm.org/doi/10.1145/1511379.1511544)
-- [Time Series Forecasting](https://machinelearningmastery.com/time-series-forecasting/)
-- [Model Evaluation Metrics](https://scikit-learn.org/stable/modules/model_evaluation.html)
+- Models are trained on synthetic/educational datasets
+- Limited sample sizes for some datasets
+- Heart rate forecaster uses simplified lag approach
+- Not validated against clinical standards
+- **This is NOT a certified medical device**

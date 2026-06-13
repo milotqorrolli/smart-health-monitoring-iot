@@ -30,6 +30,24 @@ services:
       timeout: 10s
       retries: 12
 
+  kafka-setup:
+    image: confluentinc/cp-kafka:7.6.1
+    container_name: smart-health-kafka-setup
+    depends_on:
+      kafka:
+        condition: service_healthy
+    command: >
+      bash -c "
+        echo 'Creating Kafka topics...' &&
+        kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic health.vitals --partitions 3 --replication-factor 1 &&
+        kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic health.blood_pressure --partitions 3 --replication-factor 1 &&
+        kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic health.glucose --partitions 3 --replication-factor 1 &&
+        kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic health.activity --partitions 3 --replication-factor 1 &&
+        kafka-topics --bootstrap-server kafka:29092 --create --if-not-exists --topic health.fall_safety --partitions 3 --replication-factor 1 &&
+        echo 'All topics created successfully.'
+      "
+    restart: "no"
+
   cassandra:
     image: cassandra:4.1
     container_name: smart-health-cassandra
@@ -89,7 +107,7 @@ services:
       SPARK_SSL_ENABLED: "no"
 
   spark-streaming:
-    image: bitnamilegacy/spark:3.5.1
+    build: ./spark
     container_name: smart-health-spark-streaming
     depends_on:
       kafka:
@@ -103,31 +121,34 @@ services:
     volumes:
       - ./spark:/app:ro
       - ./models:/models:ro
-      - ./ml:/ml:ro
+      - ./alerts:/app/alerts:ro
     environment:
       HOME: /tmp
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
-      KAFKA_TOPIC: smart-health-data
       CASSANDRA_HOST: cassandra
       CASSANDRA_KEYSPACE: smart_health
-      CASSANDRA_TABLE: sensor_readings
-      MODELS_PATH: /models
+      ALERT_SMTP_HOST: ${ALERT_SMTP_HOST:-smtp.gmail.com}
+      ALERT_SMTP_PORT: ${ALERT_SMTP_PORT:-587}
+      ALERT_SMTP_USER: ${ALERT_SMTP_USER:-}
+      ALERT_SMTP_PASSWORD: ${ALERT_SMTP_PASSWORD:-}
+      ALERT_DOCTOR_EMAIL: ${ALERT_DOCTOR_EMAIL:-}
+      ALERT_DOCTOR_NAME: ${ALERT_DOCTOR_NAME:-Doctor}
+      ALERT_MIN_SEVERITY: ${ALERT_MIN_SEVERITY:-HIGH}
+      ALERT_COOLDOWN_MINUTES: ${ALERT_COOLDOWN_MINUTES:-5}
+      DASHBOARD_BASE_URL: ${DASHBOARD_BASE_URL:-http://localhost:5000}
     command:
       - /bin/bash
       - -c
       - >
-        pip install --quiet pandas numpy scikit-learn joblib &&
         /opt/bitnami/spark/bin/spark-submit
         --master spark://spark-master:7077
-        --driver-memory 1g
-        --executor-memory 1g
-        --conf spark.executor.cores=2
-        --conf spark.cores.max=2
-        --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1,com.datastax.spark:spark-cassandra-connector_2.12:3.5.1
+        --driver-memory 512m
+        --executor-memory 512m
+        --conf spark.executor.cores=1
+        --conf spark.cores.max=1
+        --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1
         --conf spark.jars.ivy=/tmp/.ivy2
-        --conf spark.cassandra.connection.host=$$CASSANDRA_HOST
         --conf spark.sql.streaming.checkpointLocation=/tmp/smart-health-checkpoint
-        --py-files /app/streaming_job.py
         /app/streaming_job.py
     restart: on-failure
 
@@ -139,8 +160,6 @@ services:
         condition: service_healthy
     environment:
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
-      KAFKA_TOPIC: smart-health-data
-      SIMULATION_INTERVAL_SECONDS: 3
     restart: unless-stopped
 
   dashboard:
@@ -153,9 +172,24 @@ services:
       CASSANDRA_HOST: cassandra
       CASSANDRA_KEYSPACE: smart_health
       PATIENT_IDS: patient-1,patient-2,patient-3,patient-4,patient-5
+      ALERT_CONFIG_PATH: /app/alerts/alert_config.yml
+      ALERT_SMTP_USER: ${ALERT_SMTP_USER:-}
+    volumes:
+      - ./alerts:/app/alerts
     ports:
       - "5000:5000"
     restart: unless-stopped
+
+  # Optional: MailHog for local email testing
+  # Start with: docker compose --profile dev up -d
+  mailhog:
+    image: mailhog/mailhog
+    container_name: smart-health-mailhog
+    ports:
+      - "1025:1025"
+      - "8025:8025"
+    profiles:
+      - dev
 
 volumes:
   cassandra-data:

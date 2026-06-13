@@ -1,278 +1,255 @@
 """
-Model Utilities for Smart Health Monitoring IoT System
-
-Contains:
-- Unified feature schema definitions
-- Status derivation functions
-- Risk score calculation
-- Feature preprocessing utilities
+Model utility functions for Smart Health Monitoring IoT System.
+Contains derive_status(), generate_alert(), and shared preprocessing logic.
 """
 
-import json
-from pathlib import Path
-from enum import Enum
-
-# Feature schema definitions
-DEMOGRAPHIC_FEATURES = [
-    "age",
-    "gender",
-    "weight",
-    "height",
-    "bmi",
-]
-
-VITAL_FEATURES = [
-    "heart_rate",
-    "spo2",
-    "temperature",
-    "systolic_bp",
-    "diastolic_bp",
-    "respiratory_rate",
-    "glucose_level",
-    "skin_temperature",
-]
-
-ACTIVITY_FEATURES = [
-    "activity_level",
-    "exercise_type",
-    "exercise_intensity",
-    "steps",
-    "stress_level",
-    "sleep_duration",
-    "sleep_quality",
-    "screen_time",
-    "notifications_received",
-]
-
-SENSOR_FEATURES = [
-    "fall_detected",
-    "battery_level",
-]
-
-MEDICAL_FEATURES = [
-    "chronic_condition",
-    "smoker",
-    "medication",
-    "predicted_disease_simulated",
-]
-
-ALL_INPUT_FEATURES = (
-    DEMOGRAPHIC_FEATURES
-    + VITAL_FEATURES
-    + ACTIVITY_FEATURES
-    + SENSOR_FEATURES
-    + MEDICAL_FEATURES
-)
-
-AI_OUTPUT_FEATURES = [
-    "predicted_status",
-    "risk_score",
-    "risk_level",
-    "is_anomaly",
-    "anomaly_score",
-    "anomaly_type",
-    "predicted_next_heart_rate",
-    "alert_type",
-    "alert_severity",
-    "alert_message",
-    "model_version",
-]
-
-CATEGORICAL_FEATURES = [
-    "gender",
-    "activity_level",
-    "exercise_type",
-    "exercise_intensity",
-    "stress_level",
-    "sleep_quality",
-    "chronic_condition",
-    "smoker",
-    "medication",
-    "predicted_disease_simulated",
-]
-
-NUMERIC_FEATURES = [f for f in ALL_INPUT_FEATURES if f not in CATEGORICAL_FEATURES and f != "fall_detected"]
-
-BOOLEAN_FEATURES = [
-    "fall_detected",
-]
+import numpy as np
 
 
-class HealthStatus(str, Enum):
-    """Health status levels."""
-    NORMAL = "NORMAL"
-    WARNING = "WARNING"
-    CRITICAL = "CRITICAL"
-    EMERGENCY = "EMERGENCY"
+# =============================================================================
+# STATUS DERIVATION (Rule-based)
+# =============================================================================
+
+def derive_vital_status(vital_name, value):
+    """Derive status for a single vital sign based on clinical thresholds."""
+    if value is None or (isinstance(value, float) and np.isnan(value)):
+        return "NORMAL"
+
+    if vital_name == "heart_rate":
+        if 60 <= value <= 100:
+            return "NORMAL"
+        elif (50 <= value <= 59) or (101 <= value <= 130):
+            return "WARNING"
+        elif (40 <= value <= 49) or (131 <= value <= 150):
+            return "CRITICAL"
+        else:
+            return "EMERGENCY"
+
+    elif vital_name == "spo2":
+        if value >= 95:
+            return "NORMAL"
+        elif 90 <= value <= 94:
+            return "WARNING"
+        elif 85 <= value <= 89:
+            return "CRITICAL"
+        else:
+            return "EMERGENCY"
+
+    elif vital_name == "temperature":
+        if 36.0 <= value <= 37.8:
+            return "NORMAL"
+        elif (35.0 <= value <= 35.9) or (37.9 <= value <= 38.9):
+            return "WARNING"
+        elif 39.0 <= value <= 39.9:
+            return "CRITICAL"
+        else:
+            return "EMERGENCY"
+
+    elif vital_name == "systolic_bp":
+        if 90 <= value <= 140:
+            return "NORMAL"
+        elif 141 <= value <= 160:
+            return "WARNING"
+        elif 161 <= value <= 200:
+            return "CRITICAL"
+        elif value > 200 or value < 80:
+            return "EMERGENCY"
+        else:
+            return "WARNING"
+
+    elif vital_name == "diastolic_bp":
+        if 60 <= value <= 90:
+            return "NORMAL"
+        elif 91 <= value <= 100:
+            return "WARNING"
+        elif 101 <= value <= 130:
+            return "CRITICAL"
+        elif value > 130 or value < 50:
+            return "EMERGENCY"
+        else:
+            return "WARNING"
+
+    elif vital_name == "respiratory_rate":
+        if 12 <= value <= 20:
+            return "NORMAL"
+        elif (10 <= value <= 11) or (21 <= value <= 30):
+            return "WARNING"
+        elif (8 <= value <= 9) or (31 <= value <= 35):
+            return "CRITICAL"
+        else:
+            return "EMERGENCY"
+
+    elif vital_name == "glucose_level":
+        if 70 <= value <= 140:
+            return "NORMAL"
+        elif 141 <= value <= 180:
+            return "WARNING"
+        elif 181 <= value <= 250:
+            return "CRITICAL"
+        elif value < 50 or value > 250:
+            return "EMERGENCY"
+        else:
+            return "WARNING"
+
+    return "NORMAL"
 
 
-class AlertType(str, Enum):
-    """Alert types."""
-    NO_ALERT = "NO_ALERT"
-    WARNING_HEALTH_ALERT = "WARNING_HEALTH_ALERT"
-    HIGH_RISK_ALERT = "HIGH_RISK_ALERT"
-    EMERGENCY_HEALTH_ALERT = "EMERGENCY_HEALTH_ALERT"
-    FALL_DETECTED = "FALL_DETECTED"
-    ANOMALY_DETECTED = "ANOMALY_DETECTED"
-    LOW_SENSOR_BATTERY = "LOW_SENSOR_BATTERY"
+SEVERITY_ORDER = {"NORMAL": 0, "WARNING": 1, "CRITICAL": 2, "EMERGENCY": 3}
+SEVERITY_FROM_INT = {0: "NORMAL", 1: "WARNING", 2: "CRITICAL", 3: "EMERGENCY"}
 
 
-class AlertSeverity(str, Enum):
-    """Alert severity levels."""
-    NONE = "NONE"
-    LOW = "LOW"
-    MEDIUM = "MEDIUM"
-    HIGH = "HIGH"
-    CRITICAL = "CRITICAL"
-
-
-def derive_status(row: dict) -> str:
+def derive_status(row):
     """
-    Derive health status from vital signs using medical thresholds.
-
-    Returns: NORMAL, WARNING, CRITICAL, or EMERGENCY
+    Derive patient health status from vital signs using rule-based thresholds.
+    Returns the maximum severity across all vital sign checks.
     """
-    # Extract values with defaults
-    hr = row.get("heart_rate", 72)
-    spo2 = row.get("spo2", 97)
-    temp = row.get("temperature", 37.0)
-    sys_bp = row.get("systolic_bp", 120)
-    dia_bp = row.get("diastolic_bp", 80)
-    rr = row.get("respiratory_rate", 16)
-    glucose = row.get("glucose_level", 100)
-    fall = row.get("fall_detected", False)
+    vitals_to_check = [
+        ("heart_rate", row.get("heart_rate")),
+        ("spo2", row.get("spo2")),
+        ("temperature", row.get("temperature")),
+        ("systolic_bp", row.get("systolic_bp")),
+        ("diastolic_bp", row.get("diastolic_bp")),
+        ("respiratory_rate", row.get("respiratory_rate")),
+        ("glucose_level", row.get("glucose_level")),
+    ]
 
-    # Emergency conditions
-    emergency_conditions = (
-        hr < 40
-        or hr > 150
-        or spo2 < 85
-        or temp >= 40.0
-        or sys_bp > 200
-        or dia_bp > 130
-        or rr < 8
-        or rr > 35
-        or glucose < 50
-        or glucose > 250
-    )
+    max_severity = 0
+    for vital_name, value in vitals_to_check:
+        if value is not None:
+            try:
+                value = float(value)
+                status = derive_vital_status(vital_name, value)
+                severity = SEVERITY_ORDER.get(status, 0)
+                max_severity = max(max_severity, severity)
+            except (ValueError, TypeError):
+                pass
 
-    if emergency_conditions:
-        return HealthStatus.EMERGENCY.value
+    # Fall upgrade rule
+    fall_detected = row.get("fall_detected", False)
+    if fall_detected is True or str(fall_detected).lower() in ("true", "yes", "1"):
+        if max_severity <= 1:  # NORMAL or WARNING → upgrade to CRITICAL
+            max_severity = 2
+        elif max_severity == 2:  # CRITICAL → upgrade to EMERGENCY
+            max_severity = 3
 
-    # Critical conditions
-    critical_conditions = (
-        hr < 50
-        or hr > 130
-        or spo2 < 90
-        or temp >= 39.0
-        or sys_bp > 180
-        or dia_bp > 120
-        or rr < 10
-        or rr > 30
-        or glucose < 70
-        or glucose > 200
-    )
-
-    if critical_conditions or (fall and hr > 100):
-        return HealthStatus.CRITICAL.value
-
-    # Warning conditions
-    warning_conditions = (
-        hr < 60
-        or hr > 100
-        or spo2 < 95
-        or temp < 36.0
-        or temp > 37.8
-        or sys_bp > 140
-        or dia_bp > 90
-        or rr < 12
-        or rr > 20
-        or glucose < 80
-        or glucose > 140
-    )
-
-    if warning_conditions or fall:
-        return HealthStatus.WARNING.value
-
-    return HealthStatus.NORMAL.value
+    return SEVERITY_FROM_INT.get(max_severity, "NORMAL")
 
 
-def derive_risk_level(risk_score: float) -> str:
-    """Map risk score to risk level."""
-    if risk_score < 25:
+def derive_risk_score_from_status(status):
+    """Map status to a numeric risk score."""
+    mapping = {"NORMAL": 20, "WARNING": 50, "CRITICAL": 75, "EMERGENCY": 92}
+    return mapping.get(status, 20)
+
+
+def derive_risk_level(risk_score):
+    """Map numeric risk score to risk level category."""
+    if risk_score is None:
         return "LOW"
-    elif risk_score < 45:
+    if risk_score <= 30:
+        return "LOW"
+    elif risk_score <= 55:
         return "MEDIUM"
-    elif risk_score < 70:
+    elif risk_score <= 75:
         return "HIGH"
     else:
         return "CRITICAL"
 
 
-def get_feature_schema() -> dict:
-    """Return unified feature schema."""
+# =============================================================================
+# ALERT GENERATION
+# =============================================================================
+
+def generate_alert(row):
+    """
+    Generate alert based on AI inference results and vital signs.
+    Returns dict with alert_type, alert_severity, alert_message.
+    """
+    fall_detected = row.get("fall_detected", False)
+    if isinstance(fall_detected, str):
+        fall_detected = fall_detected.lower() in ("true", "yes", "1")
+
+    predicted_status = row.get("predicted_status", "NORMAL")
+    risk_score = row.get("risk_score", 0) or 0
+    is_anomaly = row.get("is_anomaly", False)
+    battery_level = row.get("battery_level", 100) or 100
+
+    hr = row.get("heart_rate", "N/A")
+    spo2 = row.get("spo2", "N/A")
+    temp = row.get("temperature", "N/A")
+    sys_bp = row.get("systolic_bp", "N/A")
+    dia_bp = row.get("diastolic_bp", "N/A")
+    rr = row.get("respiratory_rate", "N/A")
+
+    alert_type = "NO_ALERT"
+    alert_severity = "NONE"
+    alert_message = "No alert."
+
+    # Priority 1: Fall detected
+    if fall_detected:
+        alert_type = "FALL_DETECTED"
+        alert_severity = "CRITICAL" if risk_score >= 70 else "HIGH"
+        alert_message = "Fall detected: patient may require immediate assistance."
+
+    # Priority 2: Emergency
+    elif predicted_status == "EMERGENCY" or risk_score >= 85:
+        alert_type = "EMERGENCY_HEALTH_ALERT"
+        alert_severity = "CRITICAL"
+        alert_message = f"Emergency alert: SpO2 at {spo2}% and heart rate at {hr} bpm detected."
+
+    # Priority 3: Critical / High risk
+    elif predicted_status == "CRITICAL" or risk_score >= 70:
+        alert_type = "HIGH_RISK_ALERT"
+        alert_severity = "HIGH"
+        alert_message = f"High risk alert: systolic BP at {sys_bp} mmHg and respiratory rate at {rr} breaths/min."
+
+    # Priority 4: Warning
+    elif predicted_status == "WARNING" or risk_score >= 45:
+        alert_type = "WARNING_HEALTH_ALERT"
+        alert_severity = "MEDIUM"
+        alert_message = f"Warning: heart rate elevated at {hr} bpm. Monitor closely."
+
+    # Priority 5: Anomaly
+    elif is_anomaly:
+        alert_type = "ANOMALY_DETECTED"
+        alert_severity = "MEDIUM"
+        alert_message = "Anomaly detected: sensor values are unusual compared to learned patterns."
+
+    # Priority 6: Low battery
+    elif battery_level < 15:
+        alert_type = "LOW_SENSOR_BATTERY"
+        alert_severity = "LOW"
+        alert_message = "Low sensor battery: device battery is below 15%."
+
+    # Append rules
+    if alert_type != "NO_ALERT":
+        if is_anomaly and alert_type != "ANOMALY_DETECTED":
+            alert_message += " Anomaly also detected in sensor readings."
+        if battery_level < 15 and alert_type != "LOW_SENSOR_BATTERY":
+            alert_message += " Sensor battery is critically low."
+
     return {
-        "input_features": ALL_INPUT_FEATURES,
-        "demographic_features": DEMOGRAPHIC_FEATURES,
-        "vital_features": VITAL_FEATURES,
-        "activity_features": ACTIVITY_FEATURES,
-        "sensor_features": SENSOR_FEATURES,
-        "medical_features": MEDICAL_FEATURES,
-        "categorical_features": CATEGORICAL_FEATURES,
-        "numeric_features": NUMERIC_FEATURES,
-        "boolean_features": BOOLEAN_FEATURES,
-        "output_features": AI_OUTPUT_FEATURES,
-        "total_input_features": len(ALL_INPUT_FEATURES),
-        "total_output_features": len(AI_OUTPUT_FEATURES),
+        "alert_type": alert_type,
+        "alert_severity": alert_severity,
+        "alert_message": alert_message,
     }
 
 
-def save_feature_schema(output_path: Path):
-    """Save feature schema to JSON."""
-    schema = get_feature_schema()
-    with open(output_path, "w") as f:
-        json.dump(schema, f, indent=2)
+# =============================================================================
+# FEATURE SCHEMA
+# =============================================================================
 
+NUMERIC_FEATURES = [
+    "age", "weight", "height", "bmi",
+    "heart_rate", "spo2", "temperature", "respiratory_rate",
+    "systolic_bp", "diastolic_bp", "glucose_level",
+    "steps", "skin_temperature", "sleep_duration", "battery_level",
+]
 
-def get_default_values() -> dict:
-    """Get default values for all features."""
-    return {
-        # Demographics
-        "age": 50,
-        "gender": "Unknown",
-        "weight": 75.0,
-        "height": 1.70,
-        "bmi": 25.9,
-        # Vitals
-        "heart_rate": 72,
-        "spo2": 98.0,
-        "temperature": 37.0,
-        "systolic_bp": 120,
-        "diastolic_bp": 80,
-        "respiratory_rate": 16,
-        "glucose_level": 100,
-        "skin_temperature": 34.0,
-        # Activity
-        "activity_level": "Resting",
-        "exercise_type": "None",
-        "exercise_intensity": "Low",
-        "steps": 2000,
-        "stress_level": "Normal",
-        "sleep_duration": 7.0,
-        "sleep_quality": "Good",
-        "screen_time": 3.0,
-        "notifications_received": 5,
-        # Sensors
-        "fall_detected": False,
-        "battery_level": 85.0,
-        # Medical
-        "chronic_condition": "None",
-        "smoker": "No",
-        "medication": "No",
-        "predicted_disease_simulated": "No Disease",
-    }
+CATEGORICAL_FEATURES = [
+    "gender", "activity_level", "exercise_type", "exercise_intensity",
+    "stress_level", "sleep_quality", "chronic_condition", "smoker", "medication",
+]
 
+BOOLEAN_FEATURES = ["fall_detected"]
 
-if __name__ == "__main__":
-    schema = get_feature_schema()
-    print(json.dumps(schema, indent=2))
+ALL_INPUT_FEATURES = NUMERIC_FEATURES + CATEGORICAL_FEATURES + BOOLEAN_FEATURES

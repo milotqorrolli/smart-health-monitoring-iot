@@ -1,224 +1,180 @@
 <!doctype html>
 <html lang="en">
-<head>
+  <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta http-equiv="refresh" content="5">
-    <title>Smart Health Monitoring - IoT Dashboard</title>
+    <meta http-equiv="refresh" content="4">
+    <title>Smart Health Monitoring IoT</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background: #0f0f0f; color: #e0e0e0; }
-        .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
-        
-        .topbar { background: linear-gradient(135deg, #1a1a2e, #16213e); padding: 30px; border-radius: 8px; margin-bottom: 30px; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
-        .topbar h1 { font-size: 28px; margin-bottom: 8px; color: #00d4ff; }
-        .topbar p { color: #a0a0a0; font-size: 12px; text-transform: uppercase; letter-spacing: 2px; }
-        
-        .status-bar { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin-bottom: 30px; }
-        .stat-card { background: #1a1a2e; padding: 20px; border-radius: 8px; border-left: 4px solid #00d4ff; }
-        .stat-value { font-size: 24px; font-weight: bold; color: #00d4ff; }
-        .stat-label { font-size: 12px; color: #888; text-transform: uppercase; margin-top: 5px; }
-        
-        .alerts-section { margin-bottom: 30px; }
-        .alerts-section h2 { margin-bottom: 15px; color: #ff6b6b; font-size: 18px; }
-        .alert-item { background: #2d0000; border-left: 4px solid #ff6b6b; padding: 15px; margin-bottom: 10px; border-radius: 4px; }
-        .alert-item.high { background: #3d1515; border-left-color: #ff9999; }
-        .alert-item.medium { background: #3d2515; border-left-color: #ffb366; }
-        .alert-time { font-size: 12px; color: #888; }
-        
-        .patients-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(350px, 1fr)); gap: 20px; }
-        .patient-card { background: #1a1a2e; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.3); }
-        .patient-header { background: #0f0f0f; padding: 15px; border-bottom: 1px solid #333; }
-        .patient-id { font-size: 16px; font-weight: bold; }
-        .patient-body { padding: 20px; }
-        
-        .vital-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 15px; margin-bottom: 15px; }
-        .vital { padding: 12px; background: #0f0f0f; border-radius: 4px; }
-        .vital-label { font-size: 11px; color: #888; text-transform: uppercase; margin-bottom: 5px; }
-        .vital-value { font-size: 20px; font-weight: bold; }
-        
-        .status-badge { display: inline-block; padding: 6px 12px; border-radius: 20px; font-size: 12px; font-weight: bold; margin-top: 10px; }
-        .status-NORMAL { background: #1a5d1a; color: #4caf50; }
-        .status-WARNING { background: #5d4a1a; color: #ffb74d; }
-        .status-CRITICAL { background: #5d1a1a; color: #ff6b6b; }
-        .status-EMERGENCY { background: #3d0000; color: #ff0000; }
-        
-        .alert-message { font-size: 12px; color: #ffb366; margin-top: 10px; padding: 10px; background: rgba(255,107,107,0.1); border-radius: 4px; }
-        
-        .table-section { margin-top: 30px; }
-        .table-section h2 { margin-bottom: 15px; color: #00d4ff; }
-        table { width: 100%; border-collapse: collapse; }
-        th { background: #0f0f0f; padding: 12px; text-align: left; font-size: 12px; text-transform: uppercase; color: #888; border-bottom: 2px solid #333; }
-        td { padding: 12px; border-bottom: 1px solid #333; font-size: 13px; }
-        tr:hover { background: rgba(0,212,255,0.05); }
-        
-        .refresh-info { text-align: center; color: #888; font-size: 12px; margin-top: 20px; }
-        
-        @media (max-width: 768px) {
-            .patients-grid { grid-template-columns: 1fr; }
-            .vital-grid { grid-template-columns: 1fr; }
-            .topbar h1 { font-size: 20px; }
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="topbar">
-            <p>Real-Time Patient Telemetry</p>
-            <h1>Smart Health Monitoring IoT System</h1>
-            <p style="margin-top: 10px; font-size: 11px; color: #888;">AI-Powered Health Analysis | Predictive Alerts | Risk Assessment</p>
+  </head>
+  <body>
+    <main class="page">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">AI-Powered IoT Patient Monitoring</p>
+          <h1>Smart Health Monitoring</h1>
+          <p class="last-updated">Last updated: <span id="update-time"></span></p>
         </div>
-
-        <div class="status-bar">
-            <div class="stat-card">
-                <div class="stat-value" id="patients-monitored">5</div>
-                <div class="stat-label">Patients Monitored</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value" id="critical-patients">0</div>
-                <div class="stat-label">Critical Patients</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value" id="recent-alerts">0</div>
-                <div class="stat-label">Recent Critical Alerts</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value" id="system-status">ACTIVE</div>
-                <div class="stat-label">System Status</div>
-            </div>
+        <div class="nav-links">
+          <a class="nav-link" href="/settings/alerts">Email Settings</a>
+          <a class="nav-link" href="/api/latest">JSON API</a>
         </div>
+      </header>
 
-        <div class="alerts-section">
-            <h2>Critical Alerts (Last 24 Hours)</h2>
-            <div id="alerts-container">
-                <p style="color: #888;">Loading alerts...</p>
+      <!-- Patient Status Cards -->
+      <section class="cards-section" aria-label="Patient Status">
+        <h2>Patient Status</h2>
+        <div class="cards-grid">
+          {% for patient in patients %}
+          <div class="patient-card card-{{ (patient.predicted_status or 'waiting')|lower }}">
+            <div class="card-header">
+              <span class="patient-name">{{ patient.patient_id }}</span>
+              <span class="status-badge badge-{{ (patient.predicted_status or 'waiting')|lower }}">
+                {{ patient.predicted_status or 'WAITING' }}
+              </span>
             </div>
-        </div>
-
-        <h2 style="color: #00d4ff; margin-bottom: 15px;">Patient Status Cards</h2>
-        <div class="patients-grid">
-            {% for reading in readings %}
-            <div class="patient-card">
-                <div class="patient-header">
-                    <div class="patient-id">{{ reading.patient_id }}</div>
-                    <div style="font-size: 12px; color: #888; margin-top: 5px;">Age: {{ reading.age or 'N/A' }} | {{ reading.gender or 'N/A' }}</div>
+            {% if patient.predicted_status and patient.predicted_status != 'WAITING' %}
+            <div class="card-body">
+              <div class="vital-row">
+                <span class="vital-label">Risk Score:</span>
+                <div class="risk-bar-container">
+                  <div class="risk-bar" style="width: {{ patient.risk_score or 0 }}%"></div>
+                  <span class="risk-value">{{ "%.0f"|format(patient.risk_score or 0) }}/100</span>
                 </div>
-                <div class="patient-body">
-                    <div class="vital-grid">
-                        <div class="vital">
-                            <div class="vital-label">Heart Rate</div>
-                            <div class="vital-value">{{ reading.heart_rate or '--' }}<span style="font-size: 12px;"> bpm</span></div>
-                        </div>
-                        <div class="vital">
-                            <div class="vital-label">SpO2</div>
-                            <div class="vital-value">{{ reading.spo2 or '--' }}<span style="font-size: 12px;">%</span></div>
-                        </div>
-                        <div class="vital">
-                            <div class="vital-label">Temperature</div>
-                            <div class="vital-value">{{ reading.temperature or '--' }}<span style="font-size: 12px;">°C</span></div>
-                        </div>
-                        <div class="vital">
-                            <div class="vital-label">Blood Pressure</div>
-                            <div class="vital-value" style="font-size: 16px;">{{ reading.systolic_bp or '--' }}/{{ reading.diastolic_bp or '--' }}</div>
-                        </div>
-                        <div class="vital">
-                            <div class="vital-label">Resp. Rate</div>
-                            <div class="vital-value">{{ reading.respiratory_rate or '--' }}<span style="font-size: 12px;"> /min</span></div>
-                        </div>
-                        <div class="vital">
-                            <div class="vital-label">Glucose</div>
-                            <div class="vital-value">{{ reading.glucose_level or '--' }}<span style="font-size: 12px;"> mg/dL</span></div>
-                        </div>
-                    </div>
-                    
-                    <div style="border-top: 1px solid #333; margin-top: 15px; padding-top: 15px;">
-                        <div style="margin-bottom: 10px;">
-                            <div style="font-size: 11px; color: #888; text-transform: uppercase; margin-bottom: 5px;">AI Predictions</div>
-                            <span class="status-badge status-{{ reading.predicted_status or 'NORMAL' }}">
-                                {{ reading.predicted_status or 'NORMAL' }}
-                            </span>
-                        </div>
-                        
-                        <div style="margin-top: 10px;">
-                            <div style="font-size: 11px; color: #888; display: flex; justify-content: space-between;">
-                                <span>Risk Score</span>
-                                <span style="color: #00d4ff;">{{ "%.1f"|format(reading.risk_score or 0) }}%</span>
-                            </div>
-                            <div style="width: 100%; height: 6px; background: #0f0f0f; border-radius: 3px; margin-top: 5px; overflow: hidden;">
-                                <div style="width: {{ reading.risk_score or 0 }}%; height: 100%; background: {% if reading.risk_score >= 85 %}#ff0000{% elif reading.risk_score >= 70 %}#ff6b6b{% elif reading.risk_score >= 45 %}#ffb366{% else %}#4caf50{% endif %}; transition: width 0.3s;"></div>
-                            </div>
-                        </div>
-                        
-                        {% if reading.is_anomaly %}
-                        <div style="margin-top: 10px; padding: 10px; background: rgba(255,107,107,0.1); border-left: 3px solid #ff6b6b; border-radius: 4px;">
-                            <div style="font-size: 11px; color: #ffb366;">⚠ Anomaly Detected</div>
-                            <div style="font-size: 11px; color: #888; margin-top: 3px;">{{ reading.anomaly_type or 'Sensor Anomaly' }} (Score: {{ "%.2f"|format(reading.anomaly_score or 0) }})</div>
-                        </div>
-                        {% endif %}
-                        
-                        {% if reading.alert_message %}
-                        <div class="alert-message">
-                            {{ reading.alert_message }}
-                        </div>
-                        {% endif %}
-                        
-                        <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #333; font-size: 11px; color: #888;">
-                            <div>Battery: {{ reading.battery_level or 'N/A' }}%</div>
-                            <div>Last Updated: {{ reading.reading_time or 'N/A' }}</div>
-                        </div>
-                    </div>
+                <span class="risk-level badge-{{ (patient.risk_level or 'low')|lower }}">{{ patient.risk_level or 'LOW' }}</span>
+              </div>
+              <div class="vitals-grid">
+                <div class="vital-item">
+                  <span class="vital-icon">❤️</span>
+                  <span class="vital-val">{{ patient.heart_rate or '-' }} <small>bpm</small></span>
                 </div>
+                <div class="vital-item">
+                  <span class="vital-icon">🫁</span>
+                  <span class="vital-val">{{ patient.spo2 or '-' }}<small>%</small></span>
+                </div>
+                <div class="vital-item">
+                  <span class="vital-icon">🌡️</span>
+                  <span class="vital-val">{{ patient.temperature or '-' }}<small>°C</small></span>
+                </div>
+                <div class="vital-item">
+                  <span class="vital-icon">💉</span>
+                  <span class="vital-val">{{ patient.systolic_bp or '-' }}/{{ patient.diastolic_bp or '-' }} <small>mmHg</small></span>
+                </div>
+                <div class="vital-item">
+                  <span class="vital-icon">🌬️</span>
+                  <span class="vital-val">{{ patient.respiratory_rate or '-' }} <small>/min</small></span>
+                </div>
+                <div class="vital-item">
+                  <span class="vital-icon">🍬</span>
+                  <span class="vital-val">{{ "%.0f"|format(patient.glucose_level or 0) }} <small>mg/dL</small></span>
+                </div>
+              </div>
+              <div class="card-meta">
+                {% if patient.is_anomaly %}<span class="anomaly-badge">⚠️ Anomaly</span>{% endif %}
+                {% if patient.battery_level and patient.battery_level < 15 %}<span class="battery-low">🔋 Low Battery</span>{% endif %}
+                <span class="reading-time">{{ patient.reading_time or '' }}</span>
+              </div>
+              {% if patient.alert_severity and patient.alert_severity not in ('NONE', 'none') %}
+              <div class="alert-box alert-{{ patient.alert_severity|lower }}">
+                <strong>{{ patient.alert_type }}</strong>: {{ patient.alert_message }}
+              </div>
+              {% endif %}
             </div>
+            {% else %}
+            <div class="card-body waiting-body">
+              <p>Waiting for sensor data...</p>
+            </div>
+            {% endif %}
+          </div>
+          {% endfor %}
+        </div>
+      </section>
+
+      <!-- Critical Alerts -->
+      <section class="alerts-section" aria-label="Recent Alerts">
+        <h2>Recent Alerts</h2>
+        {% if alerts %}
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Patient</th>
+              <th>Time</th>
+              <th>Type</th>
+              <th>Severity</th>
+              <th>Message</th>
+              <th>HR</th>
+              <th>SpO2</th>
+              <th>Temp</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for alert in alerts %}
+            <tr class="alert-row-{{ alert.alert_severity|lower }}">
+              <td>{{ alert.patient_id }}</td>
+              <td>{{ alert.alert_time }}</td>
+              <td>{{ alert.alert_type }}</td>
+              <td><span class="badge-{{ alert.alert_severity|lower }}">{{ alert.alert_severity }}</span></td>
+              <td class="msg-cell">{{ alert.alert_message }}</td>
+              <td>{{ alert.heart_rate or '-' }}</td>
+              <td>{{ alert.spo2 or '-' }}</td>
+              <td>{{ alert.temperature or '-' }}</td>
+            </tr>
             {% endfor %}
-        </div>
+          </tbody>
+        </table>
+        {% else %}
+        <p class="no-data">No alerts yet. System is monitoring...</p>
+        {% endif %}
+      </section>
 
-        <div class="refresh-info">
-            Page auto-refreshes every 5 seconds | Last Updated: <span id="last-update">--:--:--</span>
-        </div>
-    </div>
+      <!-- Recent Readings Table -->
+      <section class="readings-section" aria-label="Recent Readings">
+        <h2>Recent Readings</h2>
+        {% if readings %}
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Patient</th>
+              <th>Time</th>
+              <th>HR</th>
+              <th>SpO2</th>
+              <th>Temp</th>
+              <th>BP</th>
+              <th>Resp</th>
+              <th>Status</th>
+              <th>Risk</th>
+              <th>Alert</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in readings %}
+            <tr>
+              <td>{{ r.patient_id }}</td>
+              <td>{{ r.reading_time }}</td>
+              <td>{{ r.heart_rate or '-' }}</td>
+              <td>{{ r.spo2 or '-' }}</td>
+              <td>{{ r.temperature or '-' }}</td>
+              <td>{{ r.systolic_bp or '-' }}/{{ r.diastolic_bp or '-' }}</td>
+              <td>{{ r.respiratory_rate or '-' }}</td>
+              <td><span class="badge-{{ (r.predicted_status or 'normal')|lower }}">{{ r.predicted_status or '-' }}</span></td>
+              <td>{{ "%.0f"|format(r.risk_score or 0) }}</td>
+              <td><span class="badge-{{ (r.alert_severity or 'none')|lower }}">{{ r.alert_severity or '-' }}</span></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <p class="no-data">Waiting for data from Spark streaming pipeline...</p>
+        {% endif %}
+      </section>
 
+      <footer class="disclaimer">
+        <p>⚠️ <strong>Medical Disclaimer:</strong> This is an educational IoT simulation project only.
+        Not a certified medical device. Do not use for real clinical decisions.</p>
+      </footer>
+    </main>
     <script>
-        function updateData() {
-            // Update patient data
-            fetch('/api/latest')
-                .then(r => r.json())
-                .then(data => {
-                    const criticalCount = data.filter(p => p.predicted_status === 'EMERGENCY').length;
-                    document.getElementById('critical-patients').textContent = criticalCount;
-                    document.getElementById('last-update').textContent = new Date().toLocaleTimeString();
-                });
-
-            // Update alerts
-            fetch('/api/alerts/critical?hours=24')
-                .then(r => r.json())
-                .then(data => {
-                    const container = document.getElementById('alerts-container');
-                    document.getElementById('recent-alerts').textContent = data.length;
-                    
-                    if (data.length === 0) {
-                        container.innerHTML = '<p style="color: #888; text-align: center; padding: 20px;">No critical alerts in the last 24 hours</p>';
-                    } else {
-                        container.innerHTML = data.slice(0, 10).map(alert => `
-                            <div class="alert-item ${alert.alert_severity?.toLowerCase() === 'critical' ? '' : 'high'}">
-                                <strong>${alert.patient_id}</strong> - ${alert.alert_type}
-                                <div class="alert-time">${alert.alert_time}</div>
-                                <div style="font-size: 12px; margin-top: 5px; color: #c0c0c0;">${alert.alert_message || ''}</div>
-                            </div>
-                        `).join('');
-                    }
-                });
-
-            // Update stats
-            fetch('/api/stats')
-                .then(r => r.json())
-                .then(data => {
-                    document.getElementById('system-status').textContent = data.patients_with_data > 0 ? 'ACTIVE' : 'WAITING';
-                });
-        }
-
-        updateData();
-        setInterval(updateData, 5000);
+      document.getElementById('update-time').textContent = new Date().toLocaleTimeString();
     </script>
-</body>
+  </body>
 </html>
