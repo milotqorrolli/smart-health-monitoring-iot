@@ -90,6 +90,8 @@ SELECT COUNT(*) FROM sensor_readings;
 SELECT * FROM sensor_readings LIMIT 5;
 SELECT * FROM patient_alerts LIMIT 5;
 SELECT * FROM patient_latest_status;
+SELECT * FROM sensor_metadata LIMIT 10;
+SELECT * FROM patient_minute_metrics WHERE patient_id = 'patient-1' LIMIT 10;
 
 # Exit cqlsh
 EXIT;
@@ -111,6 +113,12 @@ curl http://localhost:5000/api/alerts?limit=10
 
 # Critical alerts (last N hours)
 curl http://localhost:5000/api/alerts/critical?hours=1
+
+# Sensor metadata
+curl http://localhost:5000/api/sensors
+
+# One-minute patient aggregates
+curl http://localhost:5000/api/metrics/patient-1?limit=10
 
 # System statistics
 curl http://localhost:5000/api/stats
@@ -300,10 +308,10 @@ docker compose up -d --build
 - **T+180s**: Dashboard showing data
 
 ### Data Flow Rate
-- **Producer**: 3 messages/second per patient × 5 patients = 15 msg/sec
-- **Spark**: Batches every 5 seconds = 75 records/batch
-- **Cassandra**: ~15 writes/second
-- **Dashboard**: Refreshes every 5 seconds
+- **Producer**: About 1 Kafka message/second across 25 simulated sensors
+- **Spark**: Batches every 10 seconds and enriches vitals-primary records
+- **Cassandra**: Stores readings, latest status, alerts, sensor metadata, and minute aggregates
+- **Dashboard**: Refreshes every 4 seconds
 
 ### Disk Usage
 - **Total**: ~2-5 GB
@@ -347,7 +355,7 @@ smart-health-monitoring-iot/
 │       └── style.css                   # Styling
 │
 ├── cassandra/                          # Database Schema
-│   └── init.cql                        # 3 tables, 40+ columns
+│   └── init.cql                        # 6 tables, enriched fields, metadata
 │
 ├── models/                             # ML Artifacts (created by training)
 │   ├── status_classifier.pkl           # Trained model
@@ -374,6 +382,8 @@ smart-health-monitoring-iot/
 - **Dashboard**: http://localhost:5000
 - **API Latest**: http://localhost:5000/api/latest
 - **API Stats**: http://localhost:5000/api/stats
+- **API Sensors**: http://localhost:5000/api/sensors
+- **API Metrics**: http://localhost:5000/api/metrics/patient-1
 - **Kafka UI** (if running): http://localhost:8080
 - **Cassandra**: localhost:9042 (CQL)
 
@@ -405,10 +415,11 @@ MODELS_PATH=./models                        # Output models directory
 ✅ `docker compose ps` shows 9 services UP
 ✅ `bash validate.sh` shows "ALL TESTS PASSED"
 ✅ `curl http://localhost:5000/api/latest` returns JSON with AI fields
+✅ `curl http://localhost:5000/api/sensors` returns sensor metadata
 ✅ Dashboard shows 5 patient cards with vitals & predictions
 ✅ Cassandra has sensor_readings with predicted_status values
-✅ Logs show "All models loaded successfully!"
-✅ Data auto-refreshes every 5 seconds
+✅ Logs show "Loaded model:"
+✅ Data auto-refreshes every 4 seconds
 ✅ Alerts appear in feed
 
 ### If not working:

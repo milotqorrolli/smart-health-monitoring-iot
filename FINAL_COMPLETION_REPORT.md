@@ -47,26 +47,30 @@ VOLUMES:
 - ./spark:/app:ro                      (Spark job)
 
 PIP INSTALL:
-- pandas numpy scikit-learn joblib
+- pandas numpy scikit-learn==1.6.1 joblib
 ```
 
 ### Phase 3: Real-Time Streaming + ML Inference
 ```
 Producer (30 fields)
     ↓ JSON
-Kafka Topic: smart-health-data
+Kafka Topics: health.vitals, health.blood_pressure, health.glucose, health.activity, health.fall_safety
     ↓
 Spark Streaming:
   1. Parse 30-field JSON
-  2. Load 4 ML models from /models
-  3. Apply all models via pandas batch conversion
-  4. Generate alerts
-  5. Create 40+ enriched record
+  2. Normalize all five topics into one sensor-event stream
+  3. Enrich vitals with latest per-patient sensor context
+  4. Load and apply 4 ML models from /models via pandas batch conversion
+  5. Generate alerts
+  6. Create 40+ enriched record
     ↓
-Cassandra (3 tables):
+Cassandra (6 tables):
   - sensor_readings (40+ fields)
   - patient_alerts (critical events)
   - patient_latest_status (fast lookup)
+  - sensor_metadata (latest sensor metadata)
+  - patient_minute_metrics (one-minute aggregates)
+  - email_alert_log (email delivery history)
     ↓
 Flask Dashboard:
   - Query Cassandra only (no direct ML calls)
@@ -120,7 +124,7 @@ http://localhost:5000
 
 ### Cassandra Schema (1 file)
 7. **cassandra/init.cql** (~100 lines)
-   - 3 tables with 40+ columns
+   - 6 tables with readings, alerts, latest status, sensor metadata, aggregates, and email logs
    - AI enrichment fields: predicted_status, risk_score, is_anomaly, etc.
    - Alert fields: alert_type, alert_severity, alert_message
    - TTL policies (30 days readings, 90 days alerts)
@@ -271,7 +275,7 @@ Alerts               → 3 fields (alert_type, alert_severity, alert_message)
 - **Output**: Boolean + anomaly score (0-1)
 - **Training Data**: Personal health dataset
 - **Metrics**: Anomaly count, anomaly rate
-- **Artifacts**: `models/anomaly_detector.pkl` + `models/anomaly_scaler.pkl`
+- **Artifacts**: `models/anomaly_detector.pkl`
 
 ### 4. Heart Rate Forecaster
 - **Algorithm**: RandomForestRegressor on lag features
@@ -279,7 +283,7 @@ Alerts               → 3 fields (alert_type, alert_severity, alert_message)
 - **Output**: T4 (next heart rate)
 - **Training Data**: Heart rate time series
 - **Metrics**: MAE, RMSE, R² Score
-- **Artifacts**: `models/heart_rate_forecaster.pkl` + `models/heart_rate_scaler.pkl`
+- **Artifacts**: `models/heart_rate_forecaster.pkl`
 
 ---
 
@@ -301,9 +305,8 @@ ls -la models/
 ### ✅ Test 2: Spark Loads Models
 ```bash
 docker logs smart-health-spark-streaming | grep "Loaded"
-# Output: "Loaded status classifier"
-# Output: "Loaded risk regressor"
-# Output: "All models loaded successfully!"
+# Output: "Loaded model: status_classifier.pkl"
+# Output: "Loaded model: risk_regressor.pkl"
 ```
 
 ### ✅ Test 3: Cassandra Has Enriched Data
@@ -437,7 +440,7 @@ Rule-Based Fallback:
 - **ML Pipeline**: ~1900 lines (train_models, prepare_datasets, model_utils, data_audit)
 - **Spark Streaming**: ~500 lines (complete ML inference pipeline)
 - **Flask Dashboard**: ~700 lines (app + templates + CSS)
-- **Cassandra Schema**: ~100 lines (3 tables, 40+ columns)
+- **Cassandra Schema**: ~150 lines (6 tables, 40+ columns, metadata, aggregates)
 - **Docker**: ~200 lines (9 services, volumes, dependencies)
 - **Validation**: ~200 lines (automated test script)
 
@@ -466,7 +469,7 @@ Rule-Based Fallback:
 ### Services
 - **9 containerized** services
 - **7 REST API** endpoints
-- **3 Cassandra** tables
+- **6 Cassandra** tables
 - **40+ columns** in enriched records
 - **4 trained** ML models
 
@@ -508,4 +511,4 @@ This Smart Health Monitoring IoT system is:
 
 **PROJECT COMPLETE**
 
-*Last Updated: June 2024*
+*Last Updated: June 13, 2026*

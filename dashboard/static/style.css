@@ -172,6 +172,7 @@ h2 { margin: 0 0 16px; font-size: 18px; color: var(--text); }
 }
 .anomaly-badge { color: var(--warning); font-weight: 600; }
 .battery-low { color: var(--critical); font-weight: 600; }
+.sensor-source { color: var(--muted); }
 
 .alert-box {
   padding: 8px 12px;
@@ -214,7 +215,7 @@ h2 { margin: 0 0 16px; font-size: 18px; color: var(--text); }
 .alert-row-high td { background: #fff5f5; }
 
 /* Sections */
-.alerts-section, .readings-section { margin-bottom: 32px; }
+.alerts-section, .readings-section, .sensors-section { margin-bottom: 32px; }
 .no-data { color: var(--muted); text-align: center; padding: 24px; }
 
 /* Settings Form */

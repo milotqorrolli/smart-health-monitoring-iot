@@ -5,7 +5,7 @@ USER root
 RUN pip install --no-cache-dir \
     pandas \
     numpy \
-    scikit-learn \
+    scikit-learn==1.6.1 \
     joblib \
     pyarrow \
     cassandra-driver \

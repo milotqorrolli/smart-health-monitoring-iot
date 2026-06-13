@@ -6,7 +6,7 @@ Displays live patient status, risk scores, anomalies, alerts, and email settings
 import logging
 import os
 import time
-from datetime import timezone
+from datetime import datetime, timezone
 
 import yaml
 from cassandra.cluster import Cluster
@@ -60,7 +60,50 @@ def serialize_datetime(value):
     """Format datetime for display."""
     if value is None:
         return ""
+    if isinstance(value, str):
+        return value
     return value.replace(tzinfo=timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def serialize_row_datetimes(row, fields):
+    """Format selected datetime fields in a Cassandra row dict."""
+    for field in fields:
+        if field in row:
+            row[field] = serialize_datetime(row.get(field))
+    return row
+
+
+def safe_count(table):
+    """Return a small demo-friendly table count, or 0 when unavailable."""
+    rows = safe_query(f"SELECT COUNT(*) AS count FROM {table}")
+    if not rows:
+        return 0
+    return rows[0].get("count", 0)
+
+
+def latest_for_patient(patient_id):
+    """Fetch one latest-status row for a patient."""
+    rows = safe_query(
+        "SELECT * FROM patient_latest_status WHERE patient_id = %s", [patient_id]
+    )
+    if not rows:
+        return None
+    return serialize_row_datetimes(rows[0], ["reading_time", "processed_at"])
+
+
+def recent_partitioned_rows(table, time_field, limit=20):
+    """Read recent rows from patient-partitioned tables and sort globally."""
+    rows = []
+    per_patient_limit = max(1, limit)
+    for pid in PATIENT_IDS:
+        rows.extend(
+            safe_query(
+                f"SELECT * FROM {table} WHERE patient_id = %s LIMIT {per_patient_limit}",
+                [pid],
+            )
+        )
+    rows.sort(key=lambda row: row.get(time_field) or datetime.min, reverse=True)
+    return rows[:limit]
 
 
 # =============================================================================
@@ -73,33 +116,34 @@ def index():
     # Get latest status for all patients
     patients = []
     for pid in PATIENT_IDS:
-        rows = safe_query(
-            "SELECT * FROM patient_latest_status WHERE patient_id = %s", [pid]
-        )
-        if rows:
-            row = rows[0]
-            row["reading_time"] = serialize_datetime(row.get("reading_time"))
-            row["processed_at"] = serialize_datetime(row.get("processed_at"))
+        row = latest_for_patient(pid)
+        if row:
             patients.append(row)
         else:
             patients.append({"patient_id": pid, "predicted_status": "WAITING"})
 
     # Get recent alerts
-    alerts = safe_query(
-        "SELECT * FROM patient_alerts LIMIT 10"
-    )
+    alerts = recent_partitioned_rows("patient_alerts", "alert_time", limit=10)
     for a in alerts:
         a["alert_time"] = serialize_datetime(a.get("alert_time"))
 
     # Get recent readings
-    readings = safe_query(
-        "SELECT * FROM sensor_readings LIMIT 20"
-    )
+    readings = recent_partitioned_rows("sensor_readings", "reading_time", limit=20)
     for r in readings:
         r["reading_time"] = serialize_datetime(r.get("reading_time"))
         r["processed_at"] = serialize_datetime(r.get("processed_at"))
 
-    return render_template("index.html", patients=patients, alerts=alerts, readings=readings)
+    sensor_metadata = safe_query("SELECT * FROM sensor_metadata LIMIT 25")
+    for sensor in sensor_metadata:
+        serialize_row_datetimes(sensor, ["last_reading_time", "last_seen_at"])
+
+    return render_template(
+        "index.html",
+        patients=patients,
+        alerts=alerts,
+        readings=readings,
+        sensor_metadata=sensor_metadata,
+    )
 
 
 @app.route("/api/latest")
@@ -107,22 +151,88 @@ def api_latest():
     """API: Get latest status for all patients."""
     patients = []
     for pid in PATIENT_IDS:
-        rows = safe_query(
-            "SELECT * FROM patient_latest_status WHERE patient_id = %s", [pid]
-        )
-        if rows:
-            row = rows[0]
-            row["reading_time"] = serialize_datetime(row.get("reading_time"))
-            row["processed_at"] = serialize_datetime(row.get("processed_at"))
+        row = latest_for_patient(pid)
+        if row:
             patients.append(row)
     return jsonify(patients)
+
+
+@app.route("/api/health")
+def api_health():
+    """API: Lightweight service health check for validation and demos."""
+    cassandra_ready = session is not None
+    return jsonify({
+        "status": "ok" if cassandra_ready else "degraded",
+        "service": "smart-health-dashboard",
+        "cassandra_connected": cassandra_ready,
+        "cassandra_host": CASSANDRA_HOST,
+        "keyspace": KEYSPACE,
+        "patients_configured": PATIENT_IDS,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    })
+
+
+@app.route("/api/stats")
+def api_stats():
+    """API: Demo statistics for data, alerts, sensors, and latest statuses."""
+    latest = [row for row in (latest_for_patient(pid) for pid in PATIENT_IDS) if row]
+    high_risk = [
+        row for row in latest
+        if row.get("alert_severity") in ("HIGH", "CRITICAL")
+        or row.get("risk_level") in ("HIGH", "CRITICAL")
+    ]
+    return jsonify({
+        "patients_configured": len(PATIENT_IDS),
+        "patients_with_latest_status": len(latest),
+        "high_risk_patients": len(high_risk),
+        "sensor_readings_count": safe_count("sensor_readings"),
+        "patient_alerts_count": safe_count("patient_alerts"),
+        "sensor_metadata_count": safe_count("sensor_metadata"),
+        "email_alert_log_count": safe_count("email_alert_log"),
+    })
+
+
+@app.route("/api/sensors")
+def api_sensors():
+    """API: Get latest metadata for simulated sensors."""
+    rows = safe_query("SELECT * FROM sensor_metadata LIMIT 100")
+    for row in rows:
+        serialize_row_datetimes(row, ["last_reading_time", "last_seen_at"])
+    return jsonify(rows)
+
+
+@app.route("/api/metrics/<patient_id>")
+def api_metrics(patient_id):
+    """API: Get one-minute aggregate metrics for a patient."""
+    limit = int(request.args.get("limit", 20))
+    rows = safe_query(
+        "SELECT * FROM patient_minute_metrics WHERE patient_id = %s LIMIT %s",
+        [patient_id, limit],
+    )
+    for row in rows:
+        serialize_row_datetimes(row, ["window_start"])
+    return jsonify(rows)
+
+
+@app.route("/api/patient/<patient_id>/latest")
+def api_patient_latest(patient_id):
+    """API compatibility route: latest status for one patient."""
+    row = latest_for_patient(patient_id)
+    return jsonify(row or {})
+
+
+@app.route("/api/patient/<patient_id>/readings")
+def api_patient_readings(patient_id):
+    """API compatibility route: reading history for one patient."""
+    return api_readings(patient_id)
 
 
 @app.route("/api/alerts")
 def api_alerts():
     """API: Get recent alerts with optional severity filter."""
     severity = request.args.get("severity")
-    rows = safe_query("SELECT * FROM patient_alerts LIMIT 20")
+    limit = int(request.args.get("limit", 20))
+    rows = recent_partitioned_rows("patient_alerts", "alert_time", limit=limit)
     for r in rows:
         r["alert_time"] = serialize_datetime(r.get("alert_time"))
     if severity:
@@ -130,11 +240,23 @@ def api_alerts():
     return jsonify(rows)
 
 
+@app.route("/api/alerts/critical")
+def api_critical_alerts():
+    """API compatibility route: recent high and critical alerts."""
+    limit = int(request.args.get("limit", 20))
+    rows = recent_partitioned_rows("patient_alerts", "alert_time", limit=limit)
+    rows = [r for r in rows if r.get("alert_severity") in ("HIGH", "CRITICAL")]
+    for r in rows:
+        r["alert_time"] = serialize_datetime(r.get("alert_time"))
+    return jsonify(rows)
+
+
 @app.route("/api/readings/<patient_id>")
 def api_readings(patient_id):
     """API: Get reading history for a specific patient."""
+    limit = int(request.args.get("limit", 50))
     rows = safe_query(
-        "SELECT * FROM sensor_readings WHERE patient_id = %s LIMIT 50", [patient_id]
+        "SELECT * FROM sensor_readings WHERE patient_id = %s LIMIT %s", [patient_id, limit]
     )
     for r in rows:
         r["reading_time"] = serialize_datetime(r.get("reading_time"))

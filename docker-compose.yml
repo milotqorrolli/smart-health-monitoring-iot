@@ -112,6 +112,8 @@ services:
     depends_on:
       kafka:
         condition: service_healthy
+      kafka-setup:
+        condition: service_completed_successfully
       cassandra-init:
         condition: service_completed_successfully
       spark-master:
@@ -150,6 +152,8 @@ services:
         --executor-memory 512m
         --conf spark.executor.cores=1
         --conf spark.cores.max=1
+        --conf spark.sql.shuffle.partitions=4
+        --conf spark.default.parallelism=4
         --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1
         --conf spark.jars.ivy=/tmp/.ivy2
         --conf spark.sql.streaming.checkpointLocation=/tmp/smart-health-checkpoint
@@ -162,6 +166,8 @@ services:
     depends_on:
       kafka:
         condition: service_healthy
+      kafka-setup:
+        condition: service_completed_successfully
     environment:
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
     restart: unless-stopped
@@ -189,6 +195,7 @@ services:
       ALERT_COOLDOWN_MINUTES: ${ALERT_COOLDOWN_MINUTES:-}
       ALERT_EMAILS_DIR: /tmp/smart-health-alerts
       DASHBOARD_BASE_URL: ${DASHBOARD_BASE_URL:-http://localhost:5000}
+      FLASK_SECRET_KEY: ${FLASK_SECRET_KEY:-smart-health-local-dev-secret}
     volumes:
       - ./alerts:/app/alerts
       - ./alert-files:/tmp/smart-health-alerts

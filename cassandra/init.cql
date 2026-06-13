@@ -8,6 +8,13 @@ WITH REPLICATION = {
 CREATE TABLE IF NOT EXISTS smart_health.sensor_readings (
     patient_id                  text,
     reading_time                timestamp,
+    vitals_sensor_id            text,
+    bp_sensor_id                text,
+    glucose_sensor_id           text,
+    activity_sensor_id          text,
+    fall_sensor_id              text,
+    source_sensor_ids           text,
+    source_sensor_types         text,
     age                         int,
     gender                      text,
     weight                      double,
@@ -75,6 +82,8 @@ CREATE TABLE IF NOT EXISTS smart_health.patient_alerts (
 CREATE TABLE IF NOT EXISTS smart_health.patient_latest_status (
     patient_id          text PRIMARY KEY,
     reading_time        timestamp,
+    source_sensor_ids   text,
+    source_sensor_types text,
     predicted_status    text,
     risk_score          double,
     risk_level          text,
@@ -91,6 +100,7 @@ CREATE TABLE IF NOT EXISTS smart_health.patient_latest_status (
     respiratory_rate    int,
     glucose_level       double,
     battery_level       double,
+    predicted_next_heart_rate double,
     processed_at        timestamp
 );
 
@@ -106,3 +116,41 @@ CREATE TABLE IF NOT EXISTS smart_health.email_alert_log (
     error_message   text,
     PRIMARY KEY ((patient_id), sent_at)
 ) WITH CLUSTERING ORDER BY (sent_at DESC);
+
+-- Table E: Latest metadata and health for every simulated sensor.
+CREATE TABLE IF NOT EXISTS smart_health.sensor_metadata (
+    sensor_id         text PRIMARY KEY,
+    patient_id        text,
+    sensor_type       text,
+    kafka_topic       text,
+    last_reading_time timestamp,
+    battery_level     double,
+    last_status       text,
+    last_seen_at      timestamp
+);
+
+-- Table F: One-minute aggregation windows for demo-ready analytics.
+CREATE TABLE IF NOT EXISTS smart_health.patient_minute_metrics (
+    patient_id              text,
+    window_start            timestamp,
+    reading_count           int,
+    avg_heart_rate          double,
+    min_spo2                double,
+    max_temperature         double,
+    max_systolic_bp         int,
+    max_risk_score          double,
+    high_or_critical_alerts int,
+    PRIMARY KEY ((patient_id), window_start)
+) WITH CLUSTERING ORDER BY (window_start DESC);
+
+-- Backward-compatible schema updates for already-created local Cassandra volumes.
+ALTER TABLE smart_health.sensor_readings ADD IF NOT EXISTS vitals_sensor_id text;
+ALTER TABLE smart_health.sensor_readings ADD IF NOT EXISTS bp_sensor_id text;
+ALTER TABLE smart_health.sensor_readings ADD IF NOT EXISTS glucose_sensor_id text;
+ALTER TABLE smart_health.sensor_readings ADD IF NOT EXISTS activity_sensor_id text;
+ALTER TABLE smart_health.sensor_readings ADD IF NOT EXISTS fall_sensor_id text;
+ALTER TABLE smart_health.sensor_readings ADD IF NOT EXISTS source_sensor_ids text;
+ALTER TABLE smart_health.sensor_readings ADD IF NOT EXISTS source_sensor_types text;
+ALTER TABLE smart_health.patient_latest_status ADD IF NOT EXISTS source_sensor_ids text;
+ALTER TABLE smart_health.patient_latest_status ADD IF NOT EXISTS source_sensor_types text;
+ALTER TABLE smart_health.patient_latest_status ADD IF NOT EXISTS predicted_next_heart_rate double;

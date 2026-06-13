@@ -45,8 +45,7 @@ This document lists every file in the complete Smart Health Monitoring IoT syste
 - models/risk_regressor.pkl
 - models/anomaly_detector.pkl
 - models/heart_rate_forecaster.pkl
-- models/anomaly_scaler.pkl
-- models/heart_rate_scaler.pkl
+- models/preprocessing_pipeline.pkl
 - models/model_metadata.json
 - models/model_metrics.json
 - models/feature_schema.json
@@ -100,7 +99,7 @@ This document lists every file in the complete Smart Health Monitoring IoT syste
 ### Cassandra
 | File | Lines | Purpose |
 |------|-------|---------|
-| [cassandra/init.cql](cassandra/init.cql) | 100+ | 3 tables with 40+ columns, AI enrichment fields |
+| [cassandra/init.cql](cassandra/init.cql) | 150+ | 6 tables with readings, alerts, latest status, metadata, aggregates, and email logs |
 
 ---
 
@@ -149,11 +148,10 @@ This document lists every file in the complete Smart Health Monitoring IoT syste
 2. risk_regressor.pkl                       (Model)
 3. anomaly_detector.pkl                     (Model)
 4. heart_rate_forecaster.pkl                (Model)
-5. anomaly_scaler.pkl                       (Preprocessing)
-6. heart_rate_scaler.pkl                    (Preprocessing)
-7. model_metadata.json                      (Metadata)
-8. model_metrics.json                       (Metrics)
-9. feature_schema.json                      (Schema)
+5. preprocessing_pipeline.pkl               (Preprocessing)
+6. model_metadata.json                      (Metadata)
+7. model_metrics.json                       (Metrics)
+8. feature_schema.json                      (Schema)
 ```
 
 ---
@@ -254,8 +252,7 @@ smart-health-monitoring-iot/
 │   ├── risk_regressor.pkl
 │   ├── anomaly_detector.pkl
 │   ├── heart_rate_forecaster.pkl
-│   ├── anomaly_scaler.pkl
-│   ├── heart_rate_scaler.pkl
+│   ├── preprocessing_pipeline.pkl
 │   ├── model_metadata.json
 │   ├── model_metrics.json
 │   └── feature_schema.json
@@ -311,7 +308,7 @@ Before claiming success:
 - [ ] All 12 Python files exist in ml/, spark/, producer/, dashboard/
 - [ ] All 8 documentation files exist in docs/
 - [ ] docker-compose.yml has 9 services configured
-- [ ] cassandra/init.cql has 3 tables with 40+ columns
+- [ ] cassandra/init.cql has 6 tables with enriched fields, sensor metadata, and aggregates
 - [ ] models/ directory exists (will be populated after training)
 - [ ] datasets/ directory has 10+ CSV files
 - [ ] validate.sh is executable and runs successfully

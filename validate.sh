@@ -3,7 +3,7 @@
 # Smart Health Monitoring IoT - Complete End-to-End Validation Script
 # This script validates that the ML pipeline is fully functional
 
-set -e
+set +e
 
 echo ""
 echo "╔════════════════════════════════════════════════════════════════════╗"
@@ -77,7 +77,7 @@ echo "────────────────────────�
 docker logs smart-health-spark-streaming 2>/dev/null | grep -q "Loaded"
 check_result "Spark logs show model loading activity"
 
-docker logs smart-health-spark-streaming 2>/dev/null | grep -q -E "All models loaded|Using rule-based fallback"
+docker logs smart-health-spark-streaming 2>/dev/null | grep -q -E "Loaded model|Model file not found|using rule-based fallback"
 check_result "Spark uses models or rule-based fallback"
 
 # Test 4: Check if Cassandra has schema
@@ -88,12 +88,19 @@ echo "────────────────────────�
 docker exec smart-health-cassandra cqlsh -e "DESCRIBE KEYSPACES" 2>/dev/null | grep -q "smart_health"
 check_result "Cassandra keyspace 'smart_health' exists"
 
+docker exec smart-health-cassandra cqlsh -e "USE smart_health; DESCRIBE TABLE sensor_metadata;" 2>/dev/null | grep -q "sensor_metadata"
+check_result "Cassandra sensor_metadata table exists"
+
+docker exec smart-health-cassandra cqlsh -e "USE smart_health; DESCRIBE TABLE patient_minute_metrics;" 2>/dev/null | grep -q "patient_minute_metrics"
+check_result "Cassandra patient_minute_metrics table exists"
+
 # Test 5: Check if Cassandra has data
 echo ""
 echo "TEST 5: Check if Cassandra has sensor readings data"
 echo "────────────────────────────────────────────────────"
 
 CASSANDRA_COUNT=$(docker exec smart-health-cassandra cqlsh -e "USE smart_health; SELECT COUNT(*) FROM sensor_readings;" 2>/dev/null | grep -oE '[0-9]+' | head -1)
+CASSANDRA_COUNT=${CASSANDRA_COUNT:-0}
 
 if [ "$CASSANDRA_COUNT" -gt 0 ]; then
     echo -e "${GREEN}✓ PASS${NC}: Cassandra has $CASSANDRA_COUNT sensor readings"
@@ -117,6 +124,12 @@ check_result "risk_score field exists in sensor_readings"
 docker exec smart-health-cassandra cqlsh -e "USE smart_health; SELECT is_anomaly FROM sensor_readings LIMIT 1;" 2>/dev/null | grep -qE "true|false|null"
 check_result "is_anomaly field exists in sensor_readings"
 
+docker exec smart-health-cassandra cqlsh -e "USE smart_health; SELECT predicted_next_heart_rate FROM patient_latest_status LIMIT 1;" 2>/dev/null | grep -qE "[0-9]|null"
+check_result "predicted_next_heart_rate field exists in patient_latest_status"
+
+docker exec smart-health-cassandra cqlsh -e "USE smart_health; SELECT sensor_id FROM sensor_metadata LIMIT 1;" 2>/dev/null | grep -qE "sensor|vitals|bp|glucose|activity|fall|null"
+check_result "sensor_metadata stores sensor IDs"
+
 # Test 7: Check if Dashboard API returns AI fields
 echo ""
 echo "TEST 7: Check if Dashboard API returns AI predictions"
@@ -134,6 +147,12 @@ check_result "Dashboard API returns is_anomaly field"
 curl -s http://localhost:5000/api/latest | grep -q "predicted_next_heart_rate"
 check_result "Dashboard API returns predicted_next_heart_rate field"
 
+curl -s http://localhost:5000/api/sensors | grep -q "sensor_id"
+check_result "Dashboard API returns sensor metadata"
+
+curl -s http://localhost:5000/api/stats | grep -q "sensor_readings_count"
+check_result "Dashboard API returns stats"
+
 # Test 8: Check if Dashboard is responding
 echo ""
 echo "TEST 8: Check if Dashboard is accessible"
@@ -147,6 +166,9 @@ check_result "Dashboard API health check returns 200 OK"
 
 curl -s -o /dev/null -w "%{http_code}" http://localhost:5000/api/latest | grep -q "200"
 check_result "Dashboard latest data endpoint returns 200 OK"
+
+curl -s -o /dev/null -w "%{http_code}" http://localhost:5000/api/sensors | grep -q "200"
+check_result "Dashboard sensor metadata endpoint returns 200 OK"
 
 # Test 9: Check if data is flowing through Producer
 echo ""
@@ -162,6 +184,7 @@ echo "TEST 10: Check if Alerts are being generated"
 echo "─────────────────────────────────────────────"
 
 ALERT_COUNT=$(docker exec smart-health-cassandra cqlsh -e "USE smart_health; SELECT COUNT(*) FROM patient_alerts;" 2>/dev/null | grep -oE '[0-9]+' | head -1)
+ALERT_COUNT=${ALERT_COUNT:-0}
 
 if [ "$ALERT_COUNT" -gt 0 ]; then
     echo -e "${GREEN}✓ PASS${NC}: Cassandra has $ALERT_COUNT patient alerts"

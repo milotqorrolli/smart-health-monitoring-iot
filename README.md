@@ -13,7 +13,7 @@ An AI-powered real-time health monitoring system that simulates IoT health senso
 │                                                                          │
 │  ┌─────────────────┐    ┌──────────────┐    ┌───────────────────────┐  │
 │  │ VitalsMonitor    │───→│health.vitals │─┐  │                       │  │
-│  │ BloodPressure    │───→│health.bp     │─┤  │  Spark Structured     │  │
+│  │ BloodPressure    │───→│health.blood_pressure│─┤  │  Spark Structured     │  │
 │  │ Glucose          │───→│health.glucose│─┼─→│  Streaming             │  │
 │  │ ActivityTracker  │───→│health.activity│─┤ │  (Join + ML Inference)│  │
 │  │ FallSafety       │───→│health.fall   │─┘  │                       │  │
@@ -85,7 +85,7 @@ cp .env.example .env  # Edit with your SMTP credentials (optional)
 ### Step 2: Install ML Training Dependencies
 
 ```bash
-pip install pandas numpy scikit-learn joblib openpyxl pyyaml
+pip install pandas numpy scikit-learn==1.6.1 joblib openpyxl pyyaml
 ```
 
 ### Step 3: Run Dataset Audit
@@ -162,7 +162,21 @@ SELECT patient_id, reading_time, predicted_status, risk_score, alert_severity
 FROM sensor_readings LIMIT 10;
 SELECT * FROM patient_alerts LIMIT 10;
 SELECT * FROM patient_latest_status;
+SELECT * FROM sensor_metadata LIMIT 10;
+SELECT * FROM patient_minute_metrics LIMIT 10;
 SELECT * FROM email_alert_log LIMIT 10;
+```
+
+### Dashboard API
+
+```bash
+curl http://localhost:5000/api/health
+curl http://localhost:5000/api/stats
+curl http://localhost:5000/api/latest
+curl http://localhost:5000/api/sensors
+curl http://localhost:5000/api/metrics/patient-1
+curl http://localhost:5000/api/patient/patient-1/readings?limit=10
+curl http://localhost:5000/api/alerts?limit=10
 ```
 
 ### Step 12: Configure Email Alerts (Optional)

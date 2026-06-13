@@ -116,7 +116,7 @@
 **Symptom:** `python ml/train_models.py` fails
 
 **Common causes:**
-- Missing dependencies: `pip install pandas numpy scikit-learn joblib openpyxl pyyaml`
+- Missing dependencies: `pip install pandas numpy scikit-learn==1.6.1 joblib openpyxl pyyaml`
 - Missing datasets: ensure `datasets/` folder has all CSV files
 - xlsx file issues: install `openpyxl` for Excel support
 - Permission errors: ensure write access to `models/` directory

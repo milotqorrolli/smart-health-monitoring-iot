@@ -68,10 +68,15 @@
                   <span class="vital-icon">🍬</span>
                   <span class="vital-val">{{ "%.0f"|format(patient.glucose_level or 0) }} <small>mg/dL</small></span>
                 </div>
+                <div class="vital-item">
+                  <span class="vital-icon">AI</span>
+                  <span class="vital-val">{{ "%.0f"|format(patient.predicted_next_heart_rate or 0) }} <small>next bpm</small></span>
+                </div>
               </div>
               <div class="card-meta">
                 {% if patient.is_anomaly %}<span class="anomaly-badge">⚠️ Anomaly</span>{% endif %}
                 {% if patient.battery_level and patient.battery_level < 15 %}<span class="battery-low">🔋 Low Battery</span>{% endif %}
+                {% if patient.source_sensor_ids %}<span class="sensor-source">Sensors: {{ patient.source_sensor_ids }}</span>{% endif %}
                 <span class="reading-time">{{ patient.reading_time or '' }}</span>
               </div>
               {% if patient.alert_severity and patient.alert_severity not in ('NONE', 'none') %}
@@ -143,6 +148,8 @@
               <th>Resp</th>
               <th>Status</th>
               <th>Risk</th>
+              <th>Next HR</th>
+              <th>Sensors</th>
               <th>Alert</th>
             </tr>
           </thead>
@@ -158,6 +165,8 @@
               <td>{{ r.respiratory_rate or '-' }}</td>
               <td><span class="badge-{{ (r.predicted_status or 'normal')|lower }}">{{ r.predicted_status or '-' }}</span></td>
               <td>{{ "%.0f"|format(r.risk_score or 0) }}</td>
+              <td>{{ "%.0f"|format(r.predicted_next_heart_rate or 0) }}</td>
+              <td class="msg-cell">{{ r.source_sensor_ids or '-' }}</td>
               <td><span class="badge-{{ (r.alert_severity or 'none')|lower }}">{{ r.alert_severity or '-' }}</span></td>
             </tr>
             {% endfor %}
@@ -165,6 +174,41 @@
         </table>
         {% else %}
         <p class="no-data">Waiting for data from Spark streaming pipeline...</p>
+        {% endif %}
+      </section>
+
+      <!-- Sensor Metadata Table -->
+      <section class="sensors-section" aria-label="Sensor Metadata">
+        <h2>Sensor Metadata</h2>
+        {% if sensor_metadata %}
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Sensor</th>
+              <th>Patient</th>
+              <th>Type</th>
+              <th>Topic</th>
+              <th>Battery</th>
+              <th>Status</th>
+              <th>Last Reading</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for sensor in sensor_metadata %}
+            <tr>
+              <td>{{ sensor.sensor_id }}</td>
+              <td>{{ sensor.patient_id }}</td>
+              <td>{{ sensor.sensor_type }}</td>
+              <td>{{ sensor.kafka_topic }}</td>
+              <td>{{ "%.1f"|format(sensor.battery_level or 0) }}%</td>
+              <td><span class="badge-{{ (sensor.last_status or 'normal')|lower }}">{{ sensor.last_status or '-' }}</span></td>
+              <td>{{ sensor.last_reading_time or '' }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        {% else %}
+        <p class="no-data">Waiting for sensor metadata from Spark...</p>
         {% endif %}
       </section>
 

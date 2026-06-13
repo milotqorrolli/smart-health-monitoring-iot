@@ -6,7 +6,7 @@ End-to-end demonstration walkthrough for university presentation.
 
 ```bash
 # 1. Train ML models
-pip install pandas numpy scikit-learn joblib openpyxl pyyaml
+pip install pandas numpy scikit-learn==1.6.1 joblib openpyxl pyyaml
 python ml/train_models.py
 
 # 2. Start services (do this 5 minutes before demo)
@@ -21,7 +21,7 @@ docker ps
 ### Step 1: Show Architecture (2 minutes)
 
 Open `docs/architecture.md` or draw the architecture:
-- 5 sensors → 5 Kafka topics → Spark join → ML → Cassandra → Dashboard
+- 5 sensors → 5 Kafka topics → Spark enrichment → ML → Cassandra → Dashboard
 
 ### Step 2: Show ML Training (3 minutes)
 
@@ -56,7 +56,7 @@ docker logs -f smart-health-producer
 
 Point out:
 - 5 different sensor types publishing
-- Different intervals (5s, 15s, 30s)
+- Different intervals (15s, 30s, 45s, 60s)
 - Occasional events (falls, SpO2 drops)
 - Per-patient readings
 
@@ -79,6 +79,8 @@ Point out:
 - Vital signs display
 - Anomaly indicators
 - Alert messages
+- Predicted next heart rate
+- Sensor metadata table
 - Auto-refresh every 4 seconds
 
 ### Step 7: Show Cassandra Data (2 minutes)
@@ -94,6 +96,12 @@ FROM patient_latest_status;
 
 SELECT patient_id, alert_time, alert_type, alert_severity
 FROM patient_alerts LIMIT 5;
+
+SELECT sensor_id, patient_id, sensor_type, battery_level, last_status
+FROM sensor_metadata LIMIT 10;
+
+SELECT patient_id, window_start, avg_heart_rate, max_risk_score
+FROM patient_minute_metrics WHERE patient_id = 'patient-1' LIMIT 5;
 ```
 
 ### Step 8: Show Email Settings (1 minute)
@@ -131,8 +139,8 @@ Point out:
 
 ### Producer Output
 ```
-2026-06-12 10:00:00 [INFO] Started VITALS_MONITOR for patient-1 -> health.vitals (every 5s)
-2026-06-12 10:00:00 [INFO] Started BLOOD_PRESSURE_MONITOR for patient-1 -> health.blood_pressure (every 15s)
+2026-06-12 10:00:00 [INFO] Started VITALS_MONITOR for patient-1 -> health.vitals (every 15s)
+2026-06-12 10:00:00 [INFO] Started BLOOD_PRESSURE_MONITOR for patient-1 -> health.blood_pressure (every 45s)
 ...
 2026-06-12 10:00:30 [INFO] Heartbeat: 25/25 sensors active
 2026-06-12 10:01:05 [INFO] EVENT: Fall detected for patient-3!
