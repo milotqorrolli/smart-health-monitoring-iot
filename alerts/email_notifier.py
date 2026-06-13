@@ -222,6 +222,16 @@ class AlertEmailNotifier:
         colors = {"NORMAL": "#28a745", "WARNING": "#fd7e14", "CRITICAL": "#dc3545", "EMERGENCY": "#7b0000"}
         return colors.get(status, "#6c757d")
 
+    @staticmethod
+    def _format_predicted_heart_rate(value):
+        """Render predicted HR cleanly in alert emails."""
+        if value is None or value == "":
+            return "N/A"
+        try:
+            return f"{float(value):.1f} bpm"
+        except (TypeError, ValueError):
+            return str(value)
+
     def build_email_body(self, record):
         """Build fully rendered HTML email body."""
         severity = record.get("alert_severity", "UNKNOWN")
@@ -250,7 +260,7 @@ class AlertEmailNotifier:
         predicted_status = record.get("predicted_status", "N/A")
         risk_score = record.get("risk_score", "N/A")
         is_anomaly = record.get("is_anomaly", False)
-        predicted_hr = record.get("predicted_next_heart_rate", "N/A")
+        predicted_hr = self._format_predicted_heart_rate(record.get("predicted_next_heart_rate"))
         fall_detected = record.get("fall_detected", False)
 
         # Patient profile
@@ -308,7 +318,7 @@ class AlertEmailNotifier:
         <tr><td style="padding: 8px 0;"><strong>🤖 AI Predicted Status:</strong></td><td>{predicted_status}</td></tr>
         <tr><td style="padding: 8px 0;"><strong>📊 Risk Score:</strong></td><td>{risk_score} / 100</td></tr>
         <tr><td style="padding: 8px 0;"><strong>🔬 Anomaly Detected:</strong></td><td>{"Yes ⚠️" if is_anomaly else "No"}</td></tr>
-        <tr><td style="padding: 8px 0;"><strong>💓 Next Heart Rate (predicted):</strong></td><td>{predicted_hr} bpm</td></tr>
+        <tr><td style="padding: 8px 0;"><strong>💓 Next Heart Rate (predicted):</strong></td><td>{predicted_hr}</td></tr>
     </table>
 </div>
 

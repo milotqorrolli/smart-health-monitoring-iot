@@ -334,6 +334,50 @@ def generate_alert(row):
 # ML Inference
 # =============================================================================
 
+def _safe_float(value):
+    """Convert a scalar to float, returning None for missing/non-numeric values."""
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def fallback_heart_rate_forecast(row_dict):
+    """Deterministic one-step HR forecast used when the trained model is unavailable."""
+    hr = _safe_float(row_dict.get("heart_rate"))
+    if hr is None:
+        return None
+
+    spo2 = _safe_float(row_dict.get("spo2"))
+    temp = _safe_float(row_dict.get("temperature"))
+    rr = _safe_float(row_dict.get("respiratory_rate"))
+
+    delta = 0.0
+    if spo2 is not None:
+        if spo2 < 90:
+            delta += 3.0
+        elif spo2 < 95:
+            delta += 1.5
+
+    if temp is not None:
+        if temp >= 39:
+            delta += 2.0
+        elif temp >= 38:
+            delta += 1.0
+        elif temp < 35.5:
+            delta += 1.0
+
+    if rr is not None:
+        if rr >= 30:
+            delta += 1.5
+        elif rr <= 10:
+            delta -= 1.0
+
+    return float(round(max(30.0, min(190.0, hr + delta)), 1))
+
+
 def apply_ml_inference(row_dict):
     """Apply ML models to a single row. Falls back to rules if models unavailable."""
     import pandas as pd
@@ -406,11 +450,14 @@ def apply_ml_inference(row_dict):
             lag_features = np.array([[hr, hr, hr, hr, hr]])
             pred = MODELS["heart_rate_forecaster"].predict(lag_features)
             row_dict["predicted_next_heart_rate"] = float(round(pred[0], 1))
+            row_dict["heart_rate_forecast_method"] = "model"
         except Exception as e:
             logger.debug(f"HR forecaster failed: {e}")
-            row_dict["predicted_next_heart_rate"] = None
+            row_dict["predicted_next_heart_rate"] = fallback_heart_rate_forecast(row_dict)
+            row_dict["heart_rate_forecast_method"] = "fallback"
     else:
-        row_dict["predicted_next_heart_rate"] = None
+        row_dict["predicted_next_heart_rate"] = fallback_heart_rate_forecast(row_dict)
+        row_dict["heart_rate_forecast_method"] = "fallback"
 
     # Generate alert
     alert_type, alert_severity, alert_message = generate_alert(row_dict)
