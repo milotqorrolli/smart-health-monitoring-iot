@@ -1,0 +1,104 @@
+{
+  "status_classifier": {
+    "algorithm": "RandomForestClassifier",
+    "accuracy": 0.9999,
+    "precision_macro": 0.9998,
+    "recall_macro": 0.9993,
+    "f1_macro": 0.9996,
+    "confusion_matrix": [
+      [
+        10588,
+        0,
+        0,
+        0
+      ],
+      [
+        6,
+        2958,
+        0,
+        2
+      ],
+      [
+        0,
+        0,
+        44090,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        6542
+      ]
+    ],
+    "feature_names": [
+      "heart_rate",
+      "spo2",
+      "temperature",
+      "systolic_bp",
+      "diastolic_bp",
+      "respiratory_rate",
+      "glucose_level",
+      "fall_detected"
+    ],
+    "classes": [
+      "CRITICAL",
+      "EMERGENCY",
+      "NORMAL",
+      "WARNING"
+    ]
+  },
+  "risk_regressor": {
+    "algorithm": "GradientBoostingRegressor",
+    "mae": 20.2898,
+    "rmse": 23.0264,
+    "r2": 0.2749,
+    "feature_names": [
+      "heart_rate",
+      "spo2",
+      "temperature",
+      "systolic_bp",
+      "diastolic_bp",
+      "respiratory_rate",
+      "glucose_level",
+      "skin_temperature",
+      "battery_level",
+      "fall_detected"
+    ]
+  },
+  "anomaly_detector": {
+    "algorithm": "IsolationForest",
+    "contamination": 0.1,
+    "n_anomalies_detected": 21496,
+    "total_samples": 215000,
+    "contamination_ratio": 0.1,
+    "feature_names": [
+      "heart_rate",
+      "spo2",
+      "temperature",
+      "systolic_bp",
+      "diastolic_bp",
+      "respiratory_rate",
+      "glucose_level",
+      "skin_temperature",
+      "battery_level"
+    ],
+    "precision": 0.2732,
+    "recall": 0.943,
+    "f1": 0.4237
+  },
+  "heart_rate_forecaster": {
+    "algorithm": "GradientBoostingRegressor",
+    "mae": 0.77,
+    "rmse": 1.4393,
+    "r2": 0.9934,
+    "feature_names": [
+      "hr_lag_1",
+      "hr_lag_2",
+      "hr_lag_3",
+      "hr_lag_4",
+      "hr_lag_5"
+    ],
+    "n_samples": 5421
+  }
+}

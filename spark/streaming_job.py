@@ -419,7 +419,7 @@ def apply_ml_inference(row_dict):
     row_dict["alert_message"] = alert_message
 
     row_dict["model_version"] = MODEL_VERSION
-    row_dict["processed_at"] = datetime.utcnow()
+    row_dict["processed_at"] = to_cassandra_datetime(datetime.utcnow())
 
     return row_dict
 
@@ -506,6 +506,7 @@ def get_cassandra_session():
 
 def write_to_cassandra(records):
     """Write enriched records to Cassandra tables."""
+    logger.info(f"write_to_cassandra called with {len(records)} records")
     session = get_cassandra_session()
     if session is None:
         logger.warning("Cassandra unavailable. Skipping writes.")
@@ -513,6 +514,7 @@ def write_to_cassandra(records):
 
     for record in records:
         try:
+            logger.debug(f"Writing record for {record.get('patient_id')}: {record.get('predicted_status')}")
             # Write to sensor_readings
             session.execute(
                 """INSERT INTO sensor_readings (
@@ -662,6 +664,27 @@ def init_email_notifier():
         logger.warning(f"Email notifier initialization failed: {e}. Email alerts disabled.")
         email_notifier = None
 
+def to_cassandra_datetime(value):
+    """Convert Spark/Pandas timestamp to Python datetime for Cassandra."""
+    if value is None:
+        return datetime.utcnow()
+
+    # pandas.Timestamp
+    if hasattr(value, "to_pydatetime"):
+        return value.to_pydatetime()
+
+    # already Python datetime
+    if isinstance(value, datetime):
+        return value
+
+    # string timestamp fallback
+    if isinstance(value, str):
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00")).replace(tzinfo=None)
+        except Exception:
+            return datetime.utcnow()
+
+    return datetime.utcnow()
 
 # =============================================================================
 # Batch Processing
@@ -669,48 +692,60 @@ def init_email_notifier():
 
 def process_batch(batch_df, batch_id):
     """Process a micro-batch: apply ML inference, write to Cassandra, send alerts."""
-    if batch_df.rdd.isEmpty():
-        return
-
-    import pandas as pd
-
+    logger.info(f"process_batch START batch_id={batch_id}")
     try:
+        logger.info("Converting batch to Pandas...")
+        import pandas as pd
         pdf = batch_df.toPandas()
+        logger.info(f"SUCCESS: Got {len(pdf)} records")
+        
+        if len(pdf) == 0:
+            logger.info(f"Batch {batch_id} is empty, skipping")
+            return
+
+        logger.info(f"Processing {len(pdf)} records from batch {batch_id}")
+        enriched_records = []
+        
+        for idx, (_, row) in enumerate(pdf.iterrows()):
+            if idx % 10 == 0:
+                logger.debug(f"Processing row {idx}/{len(pdf)}")
+            row_dict = row.to_dict()
+
+            # Convert NaN/None
+            for k, v in row_dict.items():
+                if isinstance(v, float) and np.isnan(v):
+                    row_dict[k] = None
+
+            # Set reading_time
+            row_dict["reading_time"] = to_cassandra_datetime(row_dict.get("vitals_time"))
+
+            # Apply ML inference
+            enriched = apply_ml_inference(row_dict)
+            enriched_records.append(enriched)
+
+        # Write to Cassandra
+        logger.info(f"Writing {len(enriched_records)} records to Cassandra")
+        write_to_cassandra(enriched_records)
+        logger.info(f"Cassandra write complete")
+
+        # Send email alerts for HIGH and CRITICAL
+        if email_notifier is not None:
+            alert_count = 0
+            for record in enriched_records:
+                if record.get("alert_severity") in ("CRITICAL", "HIGH"):
+                    try:
+                        email_notifier.send_alert_email(record)
+                        alert_count += 1
+                    except Exception as e:
+                        logger.error(f"Email send failed for {record.get('patient_id')}: {e}")
+            if alert_count > 0:
+                logger.info(f"Sent {alert_count} alerts")
+
+        logger.info(f"process_batch COMPLETE batch_id={batch_id}")
     except Exception as e:
-        logger.error(f"Failed to convert batch to Pandas: {e}")
-        return
-
-    logger.info(f"Processing batch {batch_id}: {len(pdf)} records")
-
-    enriched_records = []
-    for _, row in pdf.iterrows():
-        row_dict = row.to_dict()
-
-        # Convert NaN/None
-        for k, v in row_dict.items():
-            if isinstance(v, float) and np.isnan(v):
-                row_dict[k] = None
-
-        # Set reading_time
-        row_dict["reading_time"] = row_dict.get("vitals_time") or datetime.utcnow()
-
-        # Apply ML inference
-        enriched = apply_ml_inference(row_dict)
-        enriched_records.append(enriched)
-
-    # Write to Cassandra
-    write_to_cassandra(enriched_records)
-
-    # Send email alerts for HIGH and CRITICAL
-    if email_notifier is not None:
-        for record in enriched_records:
-            if record.get("alert_severity") in ("CRITICAL", "HIGH"):
-                try:
-                    email_notifier.send_alert_email(record)
-                except Exception as e:
-                    logger.error(f"Email send failed for {record.get('patient_id')}: {e}")
-
-    logger.info(f"Batch {batch_id} processed: {len(enriched_records)} records written")
+        logger.error(f"ERROR in process_batch {batch_id}: {type(e).__name__}: {str(e)[:200]}")
+        import traceback
+        logger.error(traceback.format_exc())
 
 
 # =============================================================================
@@ -743,7 +778,7 @@ def main():
             spark.readStream.format("kafka")
             .option("kafka.bootstrap.servers", KAFKA_BOOTSTRAP_SERVERS)
             .option("subscribe", topic)
-            .option("startingOffsets", "latest")
+            .option("startingOffsets", "earliest")
             .option("failOnDataLoss", "false")
             .load()
         )
@@ -757,11 +792,17 @@ def main():
         return parsed
 
     # Read all streams
+    logger.info("Creating Kafka streams from all topics...")
     vitals_df = read_stream(TOPICS["vitals"], vitals_schema, "vitals")
+    logger.info(f"Vitals stream created: {vitals_df}")
     bp_df = read_stream(TOPICS["blood_pressure"], bp_schema, "bp")
+    logger.info(f"BP stream created: {bp_df}")
     glucose_df = read_stream(TOPICS["glucose"], glucose_schema, "glucose")
+    logger.info(f"Glucose stream created: {glucose_df}")
     activity_df = read_stream(TOPICS["activity"], activity_schema, "activity")
+    logger.info(f"Activity stream created: {activity_df}")
     fall_df = read_stream(TOPICS["fall_safety"], fall_schema, "fall")
+    logger.info(f"Fall stream created: {fall_df}")
 
     # Rename columns to avoid conflicts during joins
     bp_df = (bp_df
@@ -819,6 +860,7 @@ def main():
     )
 
     # Select and apply defaults for missing values
+    logger.info("Building result dataframe from joined streams...")
     result = joined.select(
         col("v.patient_id"),
         col("v.vitals_time"),
@@ -852,6 +894,8 @@ def main():
     )
 
     # Start streaming query with foreachBatch
+    logger.info(f"Result dataframe schema:\n{result.printSchema()}")
+    logger.info("Starting streaming query with foreachBatch...")
     query = (
         result.writeStream
         .foreachBatch(process_batch)

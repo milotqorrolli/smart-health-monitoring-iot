@@ -1,0 +1,22 @@
+{
+  "model_version": "1.0.0",
+  "training_date": "2026-06-13T09:47:03.892917Z",
+  "python_version": "3.13.0 (tags/v3.13.0:60403a5, Oct  7 2024, 09:38:07) [MSC v.1941 64 bit (AMD64)]",
+  "dataset_sources": [
+    "Synthetic_patient-HealthCare-Monitoring_dataset.csv",
+    "human_vital_signs_dataset_2024.csv",
+    "personal_health_data.csv",
+    "patients_data_with_alerts.xlsx",
+    "healthcare_iot_target_dataset_5000.csv",
+    "heart_rate.csv",
+    "Oxygen Dataset Final.csv",
+    "Health data.csv"
+  ],
+  "models": {
+    "status_classifier": "models/status_classifier.pkl",
+    "risk_regressor": "models/risk_regressor.pkl",
+    "anomaly_detector": "models/anomaly_detector.pkl",
+    "heart_rate_forecaster": "models/heart_rate_forecaster.pkl",
+    "preprocessing_pipeline": "models/preprocessing_pipeline.pkl"
+  }
+}

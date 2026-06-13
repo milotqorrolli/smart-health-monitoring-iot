@@ -1,0 +1,8 @@
+# Ignore all email files
+*.html
+*.txt
+*.log
+
+# Keep this directory
+!.gitignore
+!README.md

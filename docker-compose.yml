@@ -121,7 +121,6 @@ services:
     volumes:
       - ./spark:/app:ro
       - ./models:/models:ro
-      - ./alerts:/app/alerts:ro
     environment:
       HOME: /tmp
       KAFKA_BOOTSTRAP_SERVERS: kafka:29092
@@ -175,7 +174,7 @@ services:
       ALERT_CONFIG_PATH: /app/alerts/alert_config.yml
       ALERT_SMTP_USER: ${ALERT_SMTP_USER:-}
     volumes:
-      - ./alerts:/app/alerts
+      - smart-health-alerts:/app/alerts
     ports:
       - "5000:5000"
     restart: unless-stopped
@@ -193,3 +192,4 @@ services:
 
 volumes:
   cassandra-data:
+  smart-health-alerts:

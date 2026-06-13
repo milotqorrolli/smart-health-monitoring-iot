@@ -99,16 +99,20 @@ def train_status_classifier():
     )
 
     # Train RandomForest
-    rf = RandomForestClassifier(n_estimators=100, random_state=42, n_jobs=-1)
+    print("  Training RandomForestClassifier...")
+    rf = RandomForestClassifier(n_estimators=20, random_state=42, n_jobs=-1)
     rf.fit(X_train, y_train)
     rf_pred = rf.predict(X_test)
     rf_f1 = f1_score(y_test, rf_pred, average="macro", zero_division=0)
+    print(f"  RandomForest F1: {rf_f1:.4f}")
 
     # Train GradientBoosting
-    gb = GradientBoostingClassifier(n_estimators=100, random_state=42)
+    print("  Training GradientBoostingClassifier...")
+    gb = GradientBoostingClassifier(n_estimators=20, random_state=42, max_depth=5)
     gb.fit(X_train, y_train)
     gb_pred = gb.predict(X_test)
     gb_f1 = f1_score(y_test, gb_pred, average="macro", zero_division=0)
+    print(f"  GradientBoosting F1: {gb_f1:.4f}")
 
     # Select best model
     if gb_f1 > rf_f1:
@@ -177,16 +181,20 @@ def train_risk_regressor():
     )
 
     # Train RandomForest
-    rf = RandomForestRegressor(n_estimators=100, random_state=42, n_jobs=-1)
+    print("  Training RandomForestRegressor...")
+    rf = RandomForestRegressor(n_estimators=20, random_state=42, n_jobs=-1)
     rf.fit(X_train, y_train)
     rf_pred = rf.predict(X_test)
     rf_rmse = np.sqrt(mean_squared_error(y_test, rf_pred))
+    print(f"  RandomForest RMSE: {rf_rmse:.4f}")
 
     # Train GradientBoosting
-    gb = GradientBoostingRegressor(n_estimators=100, random_state=42)
+    print("  Training GradientBoostingRegressor...")
+    gb = GradientBoostingRegressor(n_estimators=20, random_state=42, max_depth=5)
     gb.fit(X_train, y_train)
     gb_pred = gb.predict(X_test)
     gb_rmse = np.sqrt(mean_squared_error(y_test, gb_pred))
+    print(f"  GradientBoosting RMSE: {gb_rmse:.4f}")
 
     # Select best model (lower RMSE)
     if gb_rmse < rf_rmse:

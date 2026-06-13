@@ -1,6 +1,7 @@
 """
 Email Alert Notification System for Smart Health Monitoring IoT System.
-Sends automated HTML email alerts to configured doctors when critical health events occur.
+Saves automated HTML email alerts to files when critical health events occur.
+Can also send via SMTP if configured.
 """
 
 import logging
@@ -14,6 +15,10 @@ import yaml
 
 logger = logging.getLogger(__name__)
 
+# Email output folder for file-based alerts (use /tmp for docker compatibility)
+ALERT_EMAILS_DIR = os.getenv("ALERT_EMAILS_DIR", "/tmp/smart-health-alerts")
+os.makedirs(ALERT_EMAILS_DIR, exist_ok=True)
+
 
 class AlertEmailNotifier:
     """Sends automated email alerts for critical patient health events."""
@@ -24,17 +29,26 @@ class AlertEmailNotifier:
         self.hourly_counter = 0
         self.hourly_reset_time = datetime.utcnow()
         self.enabled = False
+        self.smtp_enabled = False
+        self.file_output_enabled = True  # Always save to files
 
         # Load configuration
         self.config = self._load_config(config_path)
         self._apply_env_overrides()
 
-        # Check if email is enabled
+        # Check if SMTP is enabled
         if self.config.get("email", {}).get("smtp_user"):
+            self.smtp_enabled = True
             self.enabled = True
-            logger.info("Email alerting is ENABLED.")
+            logger.info("SMTP email alerting is ENABLED.")
         else:
-            logger.info("Email alerting is disabled. Set ALERT_SMTP_USER to enable.")
+            self.smtp_enabled = False
+            logger.info("SMTP email alerting is disabled. Set ALERT_SMTP_USER to enable.")
+
+        # File-based alerts are always enabled
+        if self.file_output_enabled:
+            self.enabled = True
+            logger.info(f"File-based email alerting is ENABLED. Emails saved to: {ALERT_EMAILS_DIR}")
 
     def _load_config(self, config_path):
         """Load configuration from YAML file."""
@@ -267,7 +281,7 @@ class AlertEmailNotifier:
         return html
 
     def send_alert_email(self, record):
-        """Send an alert email for a patient event. Returns True if sent successfully."""
+        """Save alert email to file and optionally send via SMTP. Returns True if processed."""
         patient_id = record.get("patient_id", "unknown")
         alert_type = record.get("alert_type", "UNKNOWN")
         alert_severity = record.get("alert_severity", "NONE")
@@ -280,6 +294,50 @@ class AlertEmailNotifier:
             subject = self.build_subject(record)
             html_body = self.build_email_body(record)
 
+            # Save to file
+            if self.file_output_enabled:
+                self._save_email_to_file(patient_id, subject, html_body, record)
+
+            # Send via SMTP if enabled
+            if self.smtp_enabled:
+                self._send_via_smtp(subject, html_body, record)
+
+            # Update rate limit tracker
+            key = (patient_id, alert_type)
+            self.rate_limit_tracker[key] = datetime.utcnow()
+            self.hourly_counter += 1
+
+            # Log to Cassandra
+            self._log_to_cassandra(record, subject, "saved", "")
+
+            return True
+
+        except Exception as e:
+            logger.error(f"Email processing failed for {patient_id}: {e}")
+            self._log_to_cassandra(record, "", "failed", str(e))
+            return False
+
+    def _save_email_to_file(self, patient_id, subject, html_body, record):
+        """Save email as HTML file in alerts/emails directory."""
+        try:
+            # Create filename with timestamp
+            timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+            alert_type = record.get("alert_type", "ALERT").replace(" ", "_")
+            filename = f"{timestamp}_{patient_id}_{alert_type}.html"
+            filepath = os.path.join(ALERT_EMAILS_DIR, filename)
+
+            # Save HTML content
+            with open(filepath, "w", encoding="utf-8") as f:
+                f.write(html_body)
+
+            logger.info(f"Email saved to file: {filepath}")
+        except Exception as e:
+            logger.error(f"Failed to save email to file: {e}")
+            raise
+
+    def _send_via_smtp(self, subject, html_body, record):
+        """Send email via SMTP to configured recipients."""
+        try:
             email_cfg = self.config.get("email", {})
             smtp_host = email_cfg.get("smtp_host", "smtp.gmail.com")
             smtp_port = email_cfg.get("smtp_port", 587)
@@ -289,6 +347,8 @@ class AlertEmailNotifier:
             use_tls = email_cfg.get("use_tls", True)
 
             doctors = self.config.get("doctors", [])
+            patient_id = record.get("patient_id", "unknown")
+            alert_type = record.get("alert_type", "UNKNOWN")
 
             for doctor in doctors:
                 recipient = doctor.get("email", "")
@@ -308,22 +368,10 @@ class AlertEmailNotifier:
                         server.login(smtp_user, smtp_password)
                     server.sendmail(smtp_user or "noreply@health-monitor.local", recipient, msg.as_string())
 
-                logger.info(f"Email sent to {recipient} for {patient_id} [{alert_type}]")
-
-            # Update rate limit tracker
-            key = (patient_id, alert_type)
-            self.rate_limit_tracker[key] = datetime.utcnow()
-            self.hourly_counter += 1
-
-            # Log to Cassandra
-            self._log_to_cassandra(record, subject, "sent", "")
-
-            return True
-
+                logger.info(f"Email sent via SMTP to {recipient} for {patient_id} [{alert_type}]")
         except Exception as e:
-            logger.error(f"Email send failed for {patient_id}: {e}")
-            self._log_to_cassandra(record, "", "failed", str(e))
-            return False
+            logger.error(f"SMTP send failed: {e}")
+            raise
 
     def _log_to_cassandra(self, record, subject, status, error_message):
         """Write email log entry to Cassandra."""

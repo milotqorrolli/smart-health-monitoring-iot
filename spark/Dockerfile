@@ -11,4 +11,7 @@ RUN pip install --no-cache-dir \
     cassandra-driver \
     pyyaml
 
+# Create alerts directory and set permissions for non-root user
+RUN mkdir -p /app/alerts && chmod 777 /app/alerts
+
 USER 1001
