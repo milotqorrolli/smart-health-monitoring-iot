@@ -36,14 +36,12 @@ class AlertEmailNotifier:
         self.config = self._load_config(config_path)
         self._apply_env_overrides()
 
-        # Check if SMTP is enabled
-        if self.config.get("email", {}).get("smtp_user"):
-            self.smtp_enabled = True
+        self.smtp_enabled = self._is_smtp_enabled()
+        if self.smtp_enabled:
             self.enabled = True
             logger.info("SMTP email alerting is ENABLED.")
         else:
-            self.smtp_enabled = False
-            logger.info("SMTP email alerting is disabled. Set ALERT_SMTP_USER to enable.")
+            logger.info("SMTP email alerting is disabled. Set ALERT_SMTP_USER or ALERT_SMTP_ENABLED=true to enable.")
 
         # File-based alerts are always enabled
         if self.file_output_enabled:
@@ -71,13 +69,33 @@ class AlertEmailNotifier:
     def _apply_env_overrides(self):
         """Override config values with environment variables."""
         email_cfg = self.config.setdefault("email", {})
-        email_cfg["smtp_host"] = os.getenv("ALERT_SMTP_HOST", email_cfg.get("smtp_host", "smtp.gmail.com"))
-        email_cfg["smtp_port"] = int(os.getenv("ALERT_SMTP_PORT", email_cfg.get("smtp_port", 587)))
-        email_cfg["smtp_user"] = os.getenv("ALERT_SMTP_USER", email_cfg.get("smtp_user", ""))
-        email_cfg["smtp_password"] = os.getenv("ALERT_SMTP_PASSWORD", email_cfg.get("smtp_password", ""))
 
-        doctor_email = os.getenv("ALERT_DOCTOR_EMAIL")
-        doctor_name = os.getenv("ALERT_DOCTOR_NAME")
+        smtp_host = self._get_env_override("ALERT_SMTP_HOST")
+        if smtp_host:
+            email_cfg["smtp_host"] = smtp_host
+
+        smtp_port = self._get_env_override("ALERT_SMTP_PORT")
+        if smtp_port:
+            email_cfg["smtp_port"] = int(smtp_port)
+
+        smtp_user = self._get_env_override("ALERT_SMTP_USER")
+        if smtp_user:
+            email_cfg["smtp_user"] = smtp_user
+
+        smtp_password = self._get_env_override("ALERT_SMTP_PASSWORD")
+        if smtp_password:
+            email_cfg["smtp_password"] = smtp_password
+
+        sender_name = self._get_env_override("ALERT_SENDER_NAME")
+        if sender_name:
+            email_cfg["sender_name"] = sender_name
+
+        smtp_enabled = self._get_env_override("ALERT_SMTP_ENABLED")
+        if smtp_enabled is not None:
+            email_cfg["enabled"] = self._env_truthy(smtp_enabled)
+
+        doctor_email = self._get_env_override("ALERT_DOCTOR_EMAIL")
+        doctor_name = self._get_env_override("ALERT_DOCTOR_NAME")
         if doctor_email:
             doctors = self.config.setdefault("doctors", [{}])
             if doctors:
@@ -85,18 +103,65 @@ class AlertEmailNotifier:
                 if doctor_name:
                     doctors[0]["name"] = doctor_name
 
-        min_severity = os.getenv("ALERT_MIN_SEVERITY")
+        min_severity = self._get_env_override("ALERT_MIN_SEVERITY")
         if min_severity:
             doctors = self.config.get("doctors", [{}])
             severity_list = [s.strip() for s in min_severity.split(",")]
             if doctors:
                 doctors[0]["receives_severity"] = severity_list
 
-        cooldown = os.getenv("ALERT_COOLDOWN_MINUTES")
+        cooldown = self._get_env_override("ALERT_COOLDOWN_MINUTES")
         if cooldown:
             self.config.setdefault("rate_limiting", {})["cooldown_minutes"] = int(cooldown)
 
         self.dashboard_url = os.getenv("DASHBOARD_BASE_URL", "http://localhost:5000")
+
+    @staticmethod
+    def _get_env_override(name):
+        """Return a non-empty environment override, or None when unset/blank."""
+        value = os.getenv(name)
+        if value is None or value == "":
+            return None
+        return value
+
+    @staticmethod
+    def _env_truthy(value):
+        """Return True for common truthy env/config values."""
+        if isinstance(value, bool):
+            return value
+        return str(value).strip().lower() in ("1", "true", "yes", "on")
+
+    def _is_smtp_enabled(self):
+        """Determine whether SMTP should be used in addition to file output."""
+        email_cfg = self.config.get("email", {})
+        explicit_enabled = email_cfg.get("enabled")
+        if explicit_enabled is not None:
+            return self._env_truthy(explicit_enabled)
+
+        smtp_host = str(email_cfg.get("smtp_host", "")).strip().lower()
+        smtp_port = int(email_cfg.get("smtp_port", 587) or 587)
+        smtp_user = str(email_cfg.get("smtp_user", "")).strip()
+        smtp_password = str(email_cfg.get("smtp_password", "")).strip()
+
+        # Authenticated providers such as Gmail need credentials. MailHog is
+        # unauthenticated, so allow it without a username/password.
+        if smtp_user and smtp_password:
+            return True
+        return smtp_host in ("mailhog", "localhost", "127.0.0.1") and smtp_port == 1025
+
+    @staticmethod
+    def _smtp_requires_auth(smtp_host):
+        """Return True for SMTP hosts that normally require authentication."""
+        return str(smtp_host).strip().lower() not in ("mailhog", "localhost", "127.0.0.1")
+
+    def _get_recipients(self):
+        """Return configured recipient email addresses."""
+        recipients = []
+        for doctor in self.config.get("doctors", []):
+            recipient = str(doctor.get("email", "")).strip()
+            if recipient:
+                recipients.append(recipient)
+        return recipients
 
     def should_send(self, patient_id, alert_type, alert_severity, risk_score):
         """Determine if an email should be sent based on rules and rate limiting."""
@@ -298,9 +363,11 @@ class AlertEmailNotifier:
             if self.file_output_enabled:
                 self._save_email_to_file(patient_id, subject, html_body, record)
 
+            sent_recipients = []
+
             # Send via SMTP if enabled
             if self.smtp_enabled:
-                self._send_via_smtp(subject, html_body, record)
+                sent_recipients = self._send_via_smtp(subject, html_body, record)
 
             # Update rate limit tracker
             key = (patient_id, alert_type)
@@ -308,7 +375,8 @@ class AlertEmailNotifier:
             self.hourly_counter += 1
 
             # Log to Cassandra
-            self._log_to_cassandra(record, subject, "saved", "")
+            status = "sent" if sent_recipients else "saved"
+            self._log_to_cassandra(record, subject, status, "", ", ".join(sent_recipients))
 
             return True
 
@@ -346,18 +414,21 @@ class AlertEmailNotifier:
             sender_name = email_cfg.get("sender_name", "Smart Health Monitor")
             use_tls = email_cfg.get("use_tls", True)
 
-            doctors = self.config.get("doctors", [])
+            recipients = self._get_recipients()
             patient_id = record.get("patient_id", "unknown")
             alert_type = record.get("alert_type", "UNKNOWN")
+            from_addr = smtp_user or "noreply@health-monitor.local"
 
-            for doctor in doctors:
-                recipient = doctor.get("email", "")
-                if not recipient:
-                    continue
+            if not recipients:
+                raise ValueError("No recipient email configured. Set ALERT_DOCTOR_EMAIL or the dashboard recipient email.")
+            if self._smtp_requires_auth(smtp_host) and not (smtp_user and smtp_password):
+                raise ValueError("SMTP username and password are required for this provider.")
 
+            sent_recipients = []
+            for recipient in recipients:
                 msg = MIMEMultipart("alternative")
                 msg["Subject"] = subject
-                msg["From"] = f"{sender_name} <{smtp_user}>"
+                msg["From"] = f"{sender_name} <{from_addr}>"
                 msg["To"] = recipient
                 msg.attach(MIMEText(html_body, "html"))
 
@@ -366,21 +437,26 @@ class AlertEmailNotifier:
                         server.starttls()
                     if smtp_user and smtp_password:
                         server.login(smtp_user, smtp_password)
-                    server.sendmail(smtp_user or "noreply@health-monitor.local", recipient, msg.as_string())
+                    server.sendmail(from_addr, recipient, msg.as_string())
 
+                sent_recipients.append(recipient)
                 logger.info(f"Email sent via SMTP to {recipient} for {patient_id} [{alert_type}]")
+
+            return sent_recipients
         except Exception as e:
             logger.error(f"SMTP send failed: {e}")
             raise
 
-    def _log_to_cassandra(self, record, subject, status, error_message):
+    def _log_to_cassandra(self, record, subject, status, error_message, recipient_email=None):
         """Write email log entry to Cassandra."""
         if not self.cassandra_session:
             return
 
         try:
             doctors = self.config.get("doctors", [])
-            recipient = doctors[0].get("email", "") if doctors else ""
+            recipient = recipient_email
+            if recipient is None:
+                recipient = doctors[0].get("email", "") if doctors else ""
 
             self.cassandra_session.execute(
                 """INSERT INTO smart_health.email_alert_log
@@ -401,10 +477,44 @@ class AlertEmailNotifier:
         except Exception as e:
             logger.warning(f"Failed to log email to Cassandra: {e}")
 
+    def send_test_email(self):
+        """Send a real SMTP test email to configured recipients."""
+        if not self.smtp_enabled:
+            raise ValueError("SMTP sending is disabled. Set ALERT_SMTP_USER and ALERT_SMTP_PASSWORD, or ALERT_SMTP_ENABLED=true for a local SMTP server.")
+
+        record = {
+            "patient_id": "test-patient",
+            "reading_time": datetime.utcnow(),
+            "alert_type": "TEST_EMAIL",
+            "alert_severity": "CRITICAL",
+            "alert_message": "This is a test email from the Smart Health Monitoring IoT alert system.",
+            "predicted_status": "TEST",
+            "risk_score": 100,
+            "is_anomaly": False,
+            "fall_detected": False,
+            "heart_rate": 72,
+            "spo2": 98,
+            "temperature": 36.7,
+            "systolic_bp": 120,
+            "diastolic_bp": 80,
+            "respiratory_rate": 16,
+            "glucose_level": 100,
+            "processed_at": datetime.utcnow().isoformat(),
+        }
+        subject = "[Smart Health Monitor] Test Email"
+        html_body = self.build_email_body(record)
+
+        if self.file_output_enabled:
+            self._save_email_to_file(record["patient_id"], subject, html_body, record)
+
+        sent_recipients = self._send_via_smtp(subject, html_body, record)
+        self._log_to_cassandra(record, subject, "sent", "", ", ".join(sent_recipients))
+        return sent_recipients
+
     def test_connection(self):
         """Test SMTP connection. Returns True if successful."""
-        if not self.enabled:
-            logger.info("Email alerting disabled. Cannot test connection.")
+        if not self.smtp_enabled:
+            logger.info("SMTP email alerting disabled. Cannot test SMTP connection.")
             return False
 
         try:
@@ -414,6 +524,10 @@ class AlertEmailNotifier:
             smtp_user = email_cfg.get("smtp_user", "")
             smtp_password = email_cfg.get("smtp_password", "")
             use_tls = email_cfg.get("use_tls", True)
+
+            if self._smtp_requires_auth(smtp_host) and not (smtp_user and smtp_password):
+                logger.error("SMTP credentials are required for this provider.")
+                return False
 
             with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as server:
                 if use_tls:

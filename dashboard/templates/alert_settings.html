@@ -156,7 +156,10 @@
           .then(r => r.json())
           .then(data => {
             if (data.status === 'sent') {
-              resultDiv.textContent = 'Test email sent successfully!';
+              const recipients = (data.recipients || []).join(', ');
+              resultDiv.textContent = recipients
+                ? 'Test email sent successfully to ' + recipients + '!'
+                : 'Test email sent successfully!';
               resultDiv.className = 'test-result test-success';
             } else {
               resultDiv.textContent = 'Failed: ' + (data.error || 'Unknown error');

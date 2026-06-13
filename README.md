@@ -167,11 +167,25 @@ SELECT * FROM email_alert_log LIMIT 10;
 
 ### Step 12: Configure Email Alerts (Optional)
 
+To send real alert emails to your own address, create `.env` from `.env.example` and set:
+
+```bash
+ALERT_SMTP_ENABLED=true
+ALERT_SMTP_HOST=smtp.gmail.com
+ALERT_SMTP_PORT=587
+ALERT_SMTP_USER=your-gmail-address@gmail.com
+ALERT_SMTP_PASSWORD=your-16-character-app-password
+ALERT_DOCTOR_EMAIL=your-recipient-email@example.com
+ALERT_DOCTOR_NAME=Your Name
+```
+
+For Gmail, `ALERT_SMTP_PASSWORD` must be a Google App Password, not your normal account password. After restarting the services, open http://localhost:5000/settings/alerts and use **Send Test Email**.
+
 For local testing with MailHog:
 ```bash
 docker compose --profile dev up -d
 ```
-Set in `.env`: `ALERT_SMTP_HOST=mailhog`, `ALERT_SMTP_PORT=1025`
+Set in `.env`: `ALERT_SMTP_ENABLED=true`, `ALERT_SMTP_HOST=mailhog`, `ALERT_SMTP_PORT=1025`, and leave `ALERT_SMTP_USER` / `ALERT_SMTP_PASSWORD` blank.
 
 ### Stop
 

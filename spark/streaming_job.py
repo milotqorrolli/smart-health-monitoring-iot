@@ -734,8 +734,8 @@ def process_batch(batch_df, batch_id):
             for record in enriched_records:
                 if record.get("alert_severity") in ("CRITICAL", "HIGH"):
                     try:
-                        email_notifier.send_alert_email(record)
-                        alert_count += 1
+                        if email_notifier.send_alert_email(record):
+                            alert_count += 1
                     except Exception as e:
                         logger.error(f"Email send failed for {record.get('patient_id')}: {e}")
             if alert_count > 0:

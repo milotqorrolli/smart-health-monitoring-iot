@@ -54,12 +54,14 @@
 2. **Gmail App Password:** Use App Password, not account password
    - Go to: https://myaccount.google.com/apppasswords
    - Generate a 16-character app password
-3. **Test with MailHog:** No authentication needed
+3. **Recipient not set:** Set `ALERT_DOCTOR_EMAIL` to the address that should receive alerts
+4. **Test from the dashboard:** Open http://localhost:5000/settings/alerts and click **Send Test Email**
+5. **Test with MailHog:** No authentication needed
    ```bash
    docker compose --profile dev up -d
-   # Set: ALERT_SMTP_HOST=mailhog, ALERT_SMTP_PORT=1025
+   # Set: ALERT_SMTP_ENABLED=true, ALERT_SMTP_HOST=mailhog, ALERT_SMTP_PORT=1025
    ```
-4. **View MailHog:** http://localhost:8025
+6. **View MailHog:** http://localhost:8025
 
 **SMTP Provider Configurations:**
 

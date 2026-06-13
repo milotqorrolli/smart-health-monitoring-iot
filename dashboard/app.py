@@ -156,12 +156,9 @@ def api_test_email():
     """API: Send test email."""
     try:
         from alerts.email_notifier import AlertEmailNotifier
-        notifier = AlertEmailNotifier(config_path=ALERT_CONFIG_PATH)
-        success = notifier.test_connection()
-        if success:
-            return jsonify({"status": "sent"})
-        else:
-            return jsonify({"status": "failed", "error": "SMTP connection failed or email alerting disabled."})
+        notifier = AlertEmailNotifier(config_path=ALERT_CONFIG_PATH, cassandra_session=session)
+        recipients = notifier.send_test_email()
+        return jsonify({"status": "sent", "recipients": recipients})
     except Exception as e:
         return jsonify({"status": "failed", "error": str(e)})
 
