@@ -33,9 +33,9 @@ Serves as the message broker between sensors and Spark. Each sensor type has its
 ### 3. Apache Spark Structured Streaming
 
 - Reads from all 5 topics simultaneously
-- Normalizes all topic messages into one sensor-event stream
-- Maintains the latest sensor values per patient/source in the streaming driver
-- Enriches each vitals event with the latest blood pressure, glucose, activity, and fall-safety context
+- Parses sensor IDs, sensor types, timestamps, and battery metadata from all five topics
+- Uses `health.vitals` as the primary stream and enriches it with time-windowed joins to the other sensor streams
+- Persists source sensor IDs/types and latest sensor metadata to Cassandra
 - Converts micro-batches to Pandas for ML inference via `foreachBatch`
 - Applies 4 ML models in sequence
 - Generates alerts based on predictions
@@ -83,30 +83,28 @@ Sends HTML emails to configured doctors when critical events occur:
 
 1. Sensor threads generate readings based on patient profiles
 2. Events published to Kafka with patient_id as key
-3. Spark reads all topics and normalizes them into one sensor-event stream
-4. Sensor metadata is updated for every event; vitals events are enriched from the latest sensor cache
-5. Enriched vitals rows are converted to Pandas for inference
+3. Spark reads all topics and joins them by patient and event-time window
+4. Joined vitals rows carry source sensor IDs/types and battery metadata
+5. Enriched rows are converted to Pandas for inference
 6. ML models predict status, risk, anomalies, and next HR
 7. Alert rules applied based on predictions
 8. Enriched records written to Cassandra
 9. Email sent for HIGH/CRITICAL alerts
 10. Dashboard reads latest status from Cassandra
 
-## Stream Enrichment
+## Stream Join And Enrichment
 
-Spark avoids a heavy multi-way stateful join in the local demo environment. Instead:
-- All five Kafka topics are normalized with `event_source`, `event_time`, `sensor_id`, `sensor_type`, and battery fields
-- Every sensor event updates `sensor_metadata`
-- Each vitals event is enriched with the latest known non-vitals values for the same patient
-- If a slower sensor has not published yet, medically neutral defaults are used
+The streaming job uses event-time joins tuned for the simulator cadence:
+- Primary stream: `health.vitals` every 15 seconds
+- Left-outer joins: blood pressure, glucose, activity, and fall-safety by `patient_id`
+- Joined rows carry `sensor_id`, `sensor_type`, source lists, and worst available sensor battery
+- If a slower sensor has not published inside the join window, medically neutral defaults are used
 
 ## foreachBatch Processing
 
 Each micro-batch (every 10 seconds):
-1. Convert normalized sensor events to Pandas
-2. Update the latest sensor cache and `sensor_metadata`
-3. Build enriched vitals records
-4. Apply ML inference per enriched row
-5. Generate alerts
-6. Write to Cassandra (cassandra-driver)
-7. Send email alerts (smtplib)
+1. Convert joined enriched rows to Pandas
+2. Apply ML inference per enriched row
+3. Generate alerts
+4. Write readings, latest status, sensor metadata, and one-minute metrics to Cassandra
+5. Send email alerts (smtplib)

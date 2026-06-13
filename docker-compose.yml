@@ -7,12 +7,18 @@ services:
       ZOOKEEPER_TICK_TIME: 2000
     ports:
       - "2181:2181"
+    healthcheck:
+      test: ["CMD-SHELL", "echo srvr | nc localhost 2181 | grep Mode >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
 
   kafka:
     image: confluentinc/cp-kafka:7.6.1
     container_name: smart-health-kafka
     depends_on:
-      - zookeeper
+      zookeeper:
+        condition: service_healthy
     ports:
       - "9092:9092"
     environment:
@@ -29,6 +35,7 @@ services:
       interval: 10s
       timeout: 10s
       retries: 12
+    restart: unless-stopped
 
   kafka-setup:
     image: confluentinc/cp-kafka:7.6.1
@@ -156,7 +163,6 @@ services:
         --conf spark.default.parallelism=4
         --packages org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.1
         --conf spark.jars.ivy=/tmp/.ivy2
-        --conf spark.sql.streaming.checkpointLocation=/tmp/smart-health-checkpoint
         /app/streaming_job.py
     restart: on-failure
 

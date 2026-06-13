@@ -19,12 +19,12 @@ from pyspark.sql import SparkSession
 from pyspark.sql.functions import (
     col,
     coalesce,
-    current_timestamp,
+    concat_ws,
     expr,
     from_json,
+    least,
     lit,
     to_timestamp,
-    when,
 )
 from pyspark.sql.types import (
     BooleanType,
@@ -45,6 +45,9 @@ logger = logging.getLogger("SparkStreaming")
 KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "kafka:29092")
 CASSANDRA_HOST = os.getenv("CASSANDRA_HOST", "cassandra")
 CASSANDRA_KEYSPACE = os.getenv("CASSANDRA_KEYSPACE", "smart_health")
+CHECKPOINT_LOCATION = os.getenv("SPARK_CHECKPOINT_LOCATION")
+if not CHECKPOINT_LOCATION:
+    CHECKPOINT_LOCATION = f"/tmp/smart-health-checkpoint-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
 
 # Kafka topics
 TOPICS = {
@@ -61,6 +64,8 @@ TOPICS = {
 
 vitals_schema = StructType([
     StructField("patient_id", StringType(), False),
+    StructField("sensor_id", StringType()),
+    StructField("sensor_type", StringType()),
     StructField("timestamp", StringType(), False),
     StructField("heart_rate", IntegerType()),
     StructField("spo2", DoubleType()),
@@ -83,6 +88,8 @@ vitals_schema = StructType([
 
 bp_schema = StructType([
     StructField("patient_id", StringType(), False),
+    StructField("sensor_id", StringType()),
+    StructField("sensor_type", StringType()),
     StructField("timestamp", StringType(), False),
     StructField("systolic_bp", IntegerType()),
     StructField("diastolic_bp", IntegerType()),
@@ -91,6 +98,8 @@ bp_schema = StructType([
 
 glucose_schema = StructType([
     StructField("patient_id", StringType(), False),
+    StructField("sensor_id", StringType()),
+    StructField("sensor_type", StringType()),
     StructField("timestamp", StringType(), False),
     StructField("glucose_level", DoubleType()),
     StructField("battery_level", DoubleType()),
@@ -98,6 +107,8 @@ glucose_schema = StructType([
 
 activity_schema = StructType([
     StructField("patient_id", StringType(), False),
+    StructField("sensor_id", StringType()),
+    StructField("sensor_type", StringType()),
     StructField("timestamp", StringType(), False),
     StructField("steps", IntegerType()),
     StructField("activity_level", StringType()),
@@ -108,6 +119,8 @@ activity_schema = StructType([
 
 fall_schema = StructType([
     StructField("patient_id", StringType(), False),
+    StructField("sensor_id", StringType()),
+    StructField("sensor_type", StringType()),
     StructField("timestamp", StringType(), False),
     StructField("fall_detected", BooleanType()),
     StructField("skin_temperature", DoubleType()),
@@ -527,6 +540,82 @@ def _risk_from_status(status):
     return mapping.get(status, 20)
 
 
+SENSOR_SOURCES = [
+    {
+        "id_field": "vitals_sensor_id",
+        "type_field": "vitals_sensor_type",
+        "battery_field": "vitals_battery",
+        "topic": TOPICS["vitals"],
+    },
+    {
+        "id_field": "bp_sensor_id",
+        "type_field": "bp_sensor_type",
+        "battery_field": "bp_battery",
+        "topic": TOPICS["blood_pressure"],
+    },
+    {
+        "id_field": "glucose_sensor_id",
+        "type_field": "glucose_sensor_type",
+        "battery_field": "glucose_battery",
+        "topic": TOPICS["glucose"],
+    },
+    {
+        "id_field": "activity_sensor_id",
+        "type_field": "activity_sensor_type",
+        "battery_field": "activity_battery",
+        "topic": TOPICS["activity"],
+    },
+    {
+        "id_field": "fall_sensor_id",
+        "type_field": "fall_sensor_type",
+        "battery_field": "fall_battery",
+        "topic": TOPICS["fall_safety"],
+    },
+]
+
+INT_RECORD_FIELDS = [
+    "age", "heart_rate", "respiratory_rate", "systolic_bp", "diastolic_bp", "steps"
+]
+
+FLOAT_RECORD_FIELDS = [
+    "weight", "height", "bmi", "spo2", "temperature", "glucose_level",
+    "skin_temperature", "battery_level", "vitals_battery", "bp_battery",
+    "glucose_battery", "activity_battery", "fall_battery", "sleep_duration",
+    "risk_score", "anomaly_score", "predicted_next_heart_rate",
+]
+
+BOOL_RECORD_FIELDS = ["fall_detected", "is_anomaly"]
+
+
+def _present(value):
+    """Return True when a scalar contains a useful sensor value."""
+    if value is None:
+        return False
+    if isinstance(value, float) and np.isnan(value):
+        return False
+    return str(value).strip() != ""
+
+
+def coerce_record_types(record):
+    """Convert Pandas/numpy scalar types into Cassandra-friendly Python types."""
+    for field in INT_RECORD_FIELDS:
+        value = record.get(field)
+        if value is not None:
+            record[field] = int(value)
+
+    for field in FLOAT_RECORD_FIELDS:
+        value = record.get(field)
+        if value is not None:
+            record[field] = float(value)
+
+    for field in BOOL_RECORD_FIELDS:
+        value = record.get(field)
+        if value is not None:
+            record[field] = bool(value)
+
+    return record
+
+
 # =============================================================================
 # Cassandra Writer
 # =============================================================================
@@ -551,6 +640,151 @@ def get_cassandra_session():
         return None
 
 
+def execute_insert(session, table, columns, values):
+    """Execute an INSERT with generated placeholders for fixed local table names."""
+    placeholders = ",".join(["%s"] * len(columns))
+    session.execute(
+        f"INSERT INTO {table} ({', '.join(columns)}) VALUES ({placeholders})",
+        tuple(values),
+    )
+
+
+def write_sensor_metadata(session, record):
+    """Upsert latest metadata for each source sensor present in an enriched row."""
+    for source in SENSOR_SOURCES:
+        sensor_id = record.get(source["id_field"])
+        if not _present(sensor_id):
+            continue
+
+        try:
+            execute_insert(
+                session,
+                "sensor_metadata",
+                [
+                    "sensor_id",
+                    "patient_id",
+                    "sensor_type",
+                    "kafka_topic",
+                    "last_reading_time",
+                    "battery_level",
+                    "last_status",
+                    "last_seen_at",
+                ],
+                [
+                    sensor_id,
+                    record.get("patient_id"),
+                    record.get(source["type_field"]),
+                    source["topic"],
+                    record.get("reading_time"),
+                    record.get(source["battery_field"]),
+                    record.get("predicted_status"),
+                    record.get("processed_at"),
+                ],
+            )
+        except Exception as e:
+            logger.warning(f"Sensor metadata write failed for {sensor_id}: {e}")
+
+
+def write_minute_metrics(session, records):
+    """Write one-minute patient aggregates for the demo analytics table."""
+    groups = {}
+    for record in records:
+        reading_time = record.get("reading_time")
+        if not isinstance(reading_time, datetime):
+            reading_time = to_cassandra_datetime(reading_time)
+        window_start = reading_time.replace(second=0, microsecond=0)
+        key = (record.get("patient_id"), window_start)
+
+        if key not in groups:
+            groups[key] = {
+                "count": 0,
+                "heart_rates": [],
+                "spo2_values": [],
+                "temperatures": [],
+                "systolic_values": [],
+                "risk_scores": [],
+                "high_alerts": 0,
+            }
+
+        group = groups[key]
+        group["count"] += 1
+        if record.get("heart_rate") is not None:
+            group["heart_rates"].append(record.get("heart_rate"))
+        if record.get("spo2") is not None:
+            group["spo2_values"].append(record.get("spo2"))
+        if record.get("temperature") is not None:
+            group["temperatures"].append(record.get("temperature"))
+        if record.get("systolic_bp") is not None:
+            group["systolic_values"].append(record.get("systolic_bp"))
+        if record.get("risk_score") is not None:
+            group["risk_scores"].append(record.get("risk_score"))
+        if record.get("alert_severity") in ("HIGH", "CRITICAL"):
+            group["high_alerts"] += 1
+
+    for (patient_id, window_start), group in groups.items():
+        try:
+            execute_insert(
+                session,
+                "patient_minute_metrics",
+                [
+                    "patient_id",
+                    "window_start",
+                    "reading_count",
+                    "avg_heart_rate",
+                    "min_spo2",
+                    "max_temperature",
+                    "max_systolic_bp",
+                    "max_risk_score",
+                    "high_or_critical_alerts",
+                ],
+                [
+                    patient_id,
+                    window_start,
+                    int(group["count"]),
+                    float(round(np.mean(group["heart_rates"]), 2)) if group["heart_rates"] else None,
+                    float(round(min(group["spo2_values"]), 2)) if group["spo2_values"] else None,
+                    float(round(max(group["temperatures"]), 2)) if group["temperatures"] else None,
+                    int(max(group["systolic_values"])) if group["systolic_values"] else None,
+                    float(round(max(group["risk_scores"]), 2)) if group["risk_scores"] else None,
+                    int(group["high_alerts"]),
+                ],
+            )
+        except Exception as e:
+            logger.warning(f"Minute metric write failed for {patient_id}: {e}")
+
+
+def should_update_latest_status(session, record):
+    """Return True when this record is fresh enough for the latest-status table."""
+    patient_id = record.get("patient_id")
+    candidate_time = record.get("reading_time")
+    if not patient_id or candidate_time is None:
+        return True
+
+    candidate_time = to_comparable_datetime(candidate_time)
+    try:
+        current = session.execute(
+            "SELECT reading_time FROM patient_latest_status WHERE patient_id = %s",
+            (patient_id,),
+        ).one()
+    except Exception as e:
+        logger.warning(f"Latest-status freshness check failed for {patient_id}: {e}")
+        return True
+
+    if current is None or current.reading_time is None:
+        return True
+
+    current_time = to_comparable_datetime(current.reading_time)
+    if candidate_time < current_time:
+        logger.info(
+            "Skipping older latest-status update for %s: candidate=%s current=%s",
+            patient_id,
+            candidate_time,
+            current_time,
+        )
+        return False
+    return True
+
+
 def write_to_cassandra(records):
     """Write enriched records to Cassandra tables."""
     logger.info(f"write_to_cassandra called with {len(records)} records")
@@ -563,24 +797,35 @@ def write_to_cassandra(records):
         try:
             logger.debug(f"Writing record for {record.get('patient_id')}: {record.get('predicted_status')}")
             # Write to sensor_readings
-            session.execute(
-                """INSERT INTO sensor_readings (
-                    patient_id, reading_time, age, gender, weight, height, bmi,
-                    heart_rate, spo2, temperature, systolic_bp, diastolic_bp,
-                    respiratory_rate, glucose_level, skin_temperature,
-                    activity_level, exercise_type, exercise_intensity, steps,
-                    stress_level, sleep_duration, sleep_quality, fall_detected,
-                    battery_level, chronic_condition, smoker, medication,
-                    predicted_disease_simulated, rule_status, predicted_status,
-                    risk_score, risk_level, is_anomaly, anomaly_score, anomaly_type,
-                    predicted_next_heart_rate, alert_type, alert_severity,
-                    alert_message, model_version, processed_at
-                ) VALUES (
-                    %s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s
-                )""",
-                (
+            execute_insert(
+                session,
+                "sensor_readings",
+                [
+                    "patient_id", "reading_time",
+                    "vitals_sensor_id", "bp_sensor_id", "glucose_sensor_id",
+                    "activity_sensor_id", "fall_sensor_id",
+                    "source_sensor_ids", "source_sensor_types",
+                    "age", "gender", "weight", "height", "bmi",
+                    "heart_rate", "spo2", "temperature", "systolic_bp", "diastolic_bp",
+                    "respiratory_rate", "glucose_level", "skin_temperature",
+                    "activity_level", "exercise_type", "exercise_intensity", "steps",
+                    "stress_level", "sleep_duration", "sleep_quality", "fall_detected",
+                    "battery_level", "chronic_condition", "smoker", "medication",
+                    "predicted_disease_simulated", "rule_status", "predicted_status",
+                    "risk_score", "risk_level", "is_anomaly", "anomaly_score", "anomaly_type",
+                    "predicted_next_heart_rate", "alert_type", "alert_severity",
+                    "alert_message", "model_version", "processed_at",
+                ],
+                [
                     record.get("patient_id"),
                     record.get("reading_time"),
+                    record.get("vitals_sensor_id"),
+                    record.get("bp_sensor_id"),
+                    record.get("glucose_sensor_id"),
+                    record.get("activity_sensor_id"),
+                    record.get("fall_sensor_id"),
+                    record.get("source_sensor_ids"),
+                    record.get("source_sensor_types"),
                     record.get("age"),
                     record.get("gender"),
                     record.get("weight"),
@@ -620,8 +865,10 @@ def write_to_cassandra(records):
                     record.get("alert_message"),
                     record.get("model_version"),
                     record.get("processed_at"),
-                ),
+                ],
             )
+
+            write_sensor_metadata(session, record)
 
             # Write alerts to patient_alerts
             if record.get("alert_severity") in ("HIGH", "CRITICAL"):
@@ -652,39 +899,49 @@ def write_to_cassandra(records):
                     ),
                 )
 
-            # Upsert patient_latest_status
-            session.execute(
-                """INSERT INTO patient_latest_status (
-                    patient_id, reading_time, predicted_status, risk_score, risk_level,
-                    is_anomaly, anomaly_score, alert_type, alert_severity, alert_message,
-                    heart_rate, spo2, temperature, systolic_bp, diastolic_bp,
-                    respiratory_rate, glucose_level, battery_level, processed_at
-                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
-                (
-                    record.get("patient_id"),
-                    record.get("reading_time"),
-                    record.get("predicted_status"),
-                    record.get("risk_score"),
-                    record.get("risk_level"),
-                    record.get("is_anomaly"),
-                    record.get("anomaly_score"),
-                    record.get("alert_type"),
-                    record.get("alert_severity"),
-                    record.get("alert_message"),
-                    record.get("heart_rate"),
-                    record.get("spo2"),
-                    record.get("temperature"),
-                    record.get("systolic_bp"),
-                    record.get("diastolic_bp"),
-                    record.get("respiratory_rate"),
-                    record.get("glucose_level"),
-                    record.get("battery_level"),
-                    record.get("processed_at"),
-                ),
-            )
+            # Upsert patient_latest_status only when the event-time reading is current.
+            if should_update_latest_status(session, record):
+                execute_insert(
+                    session,
+                    "patient_latest_status",
+                    [
+                        "patient_id", "reading_time", "source_sensor_ids", "source_sensor_types",
+                        "predicted_status", "risk_score", "risk_level",
+                        "is_anomaly", "anomaly_score", "alert_type", "alert_severity", "alert_message",
+                        "heart_rate", "spo2", "temperature", "systolic_bp", "diastolic_bp",
+                        "respiratory_rate", "glucose_level", "battery_level",
+                        "predicted_next_heart_rate", "processed_at",
+                    ],
+                    [
+                        record.get("patient_id"),
+                        record.get("reading_time"),
+                        record.get("source_sensor_ids"),
+                        record.get("source_sensor_types"),
+                        record.get("predicted_status"),
+                        record.get("risk_score"),
+                        record.get("risk_level"),
+                        record.get("is_anomaly"),
+                        record.get("anomaly_score"),
+                        record.get("alert_type"),
+                        record.get("alert_severity"),
+                        record.get("alert_message"),
+                        record.get("heart_rate"),
+                        record.get("spo2"),
+                        record.get("temperature"),
+                        record.get("systolic_bp"),
+                        record.get("diastolic_bp"),
+                        record.get("respiratory_rate"),
+                        record.get("glucose_level"),
+                        record.get("battery_level"),
+                        record.get("predicted_next_heart_rate"),
+                        record.get("processed_at"),
+                    ],
+                )
 
         except Exception as e:
             logger.error(f"Cassandra write error for {record.get('patient_id')}: {e}")
+
+    write_minute_metrics(session, records)
 
 
 # =============================================================================
@@ -733,6 +990,15 @@ def to_cassandra_datetime(value):
 
     return datetime.utcnow()
 
+
+def to_comparable_datetime(value):
+    """Normalize a timestamp for ordering checks before latest-status upserts."""
+    dt = to_cassandra_datetime(value)
+    if getattr(dt, "tzinfo", None) is not None:
+        dt = dt.replace(tzinfo=None)
+    return dt
+
+
 # =============================================================================
 # Batch Processing
 # =============================================================================
@@ -767,7 +1033,7 @@ def process_batch(batch_df, batch_id):
             row_dict["reading_time"] = to_cassandra_datetime(row_dict.get("vitals_time"))
 
             # Apply ML inference
-            enriched = apply_ml_inference(row_dict)
+            enriched = coerce_record_types(apply_ml_inference(row_dict))
             enriched_records.append(enriched)
 
         # Write to Cassandra
@@ -854,18 +1120,26 @@ def main():
 
     # Rename columns to avoid conflicts during joins
     bp_df = (bp_df
+             .withColumnRenamed("sensor_id", "bp_sensor_id")
+             .withColumnRenamed("sensor_type", "bp_sensor_type")
              .withColumnRenamed("battery_level", "bp_battery")
              .withColumnRenamed("timestamp", "bp_timestamp"))
 
     glucose_df = (glucose_df
+                  .withColumnRenamed("sensor_id", "glucose_sensor_id")
+                  .withColumnRenamed("sensor_type", "glucose_sensor_type")
                   .withColumnRenamed("battery_level", "glucose_battery")
                   .withColumnRenamed("timestamp", "glucose_timestamp"))
 
     activity_df = (activity_df
+                   .withColumnRenamed("sensor_id", "activity_sensor_id")
+                   .withColumnRenamed("sensor_type", "activity_sensor_type")
                    .withColumnRenamed("battery_level", "activity_battery")
                    .withColumnRenamed("timestamp", "activity_timestamp"))
 
     fall_df = (fall_df
+               .withColumnRenamed("sensor_id", "fall_sensor_id")
+               .withColumnRenamed("sensor_type", "fall_sensor_type")
                .withColumnRenamed("battery_level", "fall_battery")
                .withColumnRenamed("timestamp", "fall_timestamp"))
 
@@ -912,6 +1186,37 @@ def main():
     result = joined.select(
         col("v.patient_id"),
         col("v.vitals_time"),
+        col("v.sensor_id").alias("vitals_sensor_id"),
+        col("v.sensor_type").alias("vitals_sensor_type"),
+        col("bp.bp_sensor_id"),
+        col("bp.bp_sensor_type"),
+        col("g.glucose_sensor_id"),
+        col("g.glucose_sensor_type"),
+        col("a.activity_sensor_id"),
+        col("a.activity_sensor_type"),
+        col("f.fall_sensor_id"),
+        col("f.fall_sensor_type"),
+        concat_ws(
+            ",",
+            col("v.sensor_id"),
+            col("bp.bp_sensor_id"),
+            col("g.glucose_sensor_id"),
+            col("a.activity_sensor_id"),
+            col("f.fall_sensor_id"),
+        ).alias("source_sensor_ids"),
+        concat_ws(
+            ",",
+            col("v.sensor_type"),
+            col("bp.bp_sensor_type"),
+            col("g.glucose_sensor_type"),
+            col("a.activity_sensor_type"),
+            col("f.fall_sensor_type"),
+        ).alias("source_sensor_types"),
+        col("v.battery_level").alias("vitals_battery"),
+        col("bp.bp_battery"),
+        col("g.glucose_battery"),
+        col("a.activity_battery"),
+        col("f.fall_battery"),
         col("v.heart_rate"),
         col("v.spo2"),
         col("v.temperature"),
@@ -937,19 +1242,26 @@ def main():
         coalesce(col("a.exercise_intensity"), lit("Low")).alias("exercise_intensity"),
         coalesce(col("f.fall_detected"), lit(False)).alias("fall_detected"),
         coalesce(col("f.skin_temperature"), lit(36.0)).alias("skin_temperature"),
-        # Battery: min across all sensors
-        coalesce(col("v.battery_level"), lit(100.0)).alias("battery_level"),
+        # Dashboard battery health: worst available source battery in the joined record.
+        least(
+            coalesce(col("v.battery_level"), lit(100.0)),
+            coalesce(col("bp.bp_battery"), lit(100.0)),
+            coalesce(col("g.glucose_battery"), lit(100.0)),
+            coalesce(col("a.activity_battery"), lit(100.0)),
+            coalesce(col("f.fall_battery"), lit(100.0)),
+        ).alias("battery_level"),
     )
 
     # Start streaming query with foreachBatch
     logger.info(f"Result dataframe schema:\n{result.printSchema()}")
+    logger.info(f"Using checkpoint location: {CHECKPOINT_LOCATION}")
     logger.info("Starting streaming query with foreachBatch...")
     query = (
         result.writeStream
         .foreachBatch(process_batch)
         .outputMode("append")
         .trigger(processingTime="10 seconds")
-        .option("checkpointLocation", "/tmp/smart-health-checkpoint")
+        .option("checkpointLocation", CHECKPOINT_LOCATION)
         .start()
     )
 

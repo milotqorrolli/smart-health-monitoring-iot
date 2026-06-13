@@ -16,7 +16,7 @@ An AI-powered real-time health monitoring system that simulates IoT health senso
 │  │ BloodPressure    │───→│health.blood_pressure│─┤  │  Spark Structured     │  │
 │  │ Glucose          │───→│health.glucose│─┼─→│  Streaming             │  │
 │  │ ActivityTracker  │───→│health.activity│─┤ │  (Join + ML Inference)│  │
-│  │ FallSafety       │───→│health.fall   │─┘  │                       │  │
+│  │ FallSafety       │───→│health.fall_safety│─┘  │                       │  │
 │  └─────────────────┘    └──────────────┘    └───────────┬───────────┘  │
 │       Sensors               Kafka Topics                 │              │
 │                                                          ▼              │
